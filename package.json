@@ -7,7 +7,8 @@
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
     "prove": "node scripts/generateAndSubmitProof.js",
-    "check-score": "node scripts/checkScore.js"
+    "check-score": "node scripts/checkScore.js",
+    "test-tx": "node scripts/testTransaction.js"
   },
   "dependencies": {
     "@gluwa/usc-sdk": "^0.18.0",

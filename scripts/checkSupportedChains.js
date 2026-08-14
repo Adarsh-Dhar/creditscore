@@ -53,7 +53,7 @@ async function main() {
 
   // Also check for regular Ethereum Sepolia for comparison
   const sepoliaEntry = supportedChains.find((c) =>
-    c.chainName?.toLowerCase().includes("sepolia") && !c.chainName?.toLowerCase().includes("base")
+    c.chainId === 11155111 // Ethereum Sepolia chain ID
   );
   
   if (sepoliaEntry) {
