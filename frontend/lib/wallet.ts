@@ -31,8 +31,16 @@ export function useWallet() {
     const checkConnection = async () => {
       if (window.ethereum) {
         try {
-          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-          if (accounts.length > 0) {
+          // Skip the automatic check if extensions are interfering
+          // Users can manually connect via the button
+          const accounts = await Promise.race([
+            window.ethereum.request({ method: 'eth_accounts' }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Connection check timeout')), 2000)
+            )
+          ]) as string[];
+          
+          if (accounts && accounts.length > 0) {
             setState({
               address: accounts[0],
               isConnected: true,
@@ -41,7 +49,9 @@ export function useWallet() {
             });
           }
         } catch (error) {
-          console.error('Failed to check wallet connection:', error);
+          // Silently fail on initial check - don't bother user with extension errors
+          // They can manually connect if needed
+          console.log('Wallet check skipped (likely extension interference)');
         }
       }
     };
@@ -78,7 +88,7 @@ export function useWallet() {
     };
   }, [state.address]);
 
-  const connect = async () => {
+  const connect = async (retryCount = 0) => {
     if (!window.ethereum) {
       setState({
         address: null,
@@ -92,22 +102,69 @@ export function useWallet() {
     setState(prev => ({ ...prev, isConnecting: true, error: null }));
 
     try {
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      if (accounts.length > 0) {
+      // Try to request accounts with a longer timeout and retry mechanism
+      const accounts = await Promise.race([
+        window.ethereum.request({ method: 'eth_requestAccounts' }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 15000)
+        )
+      ]) as string[];
+      
+      if (accounts && accounts.length > 0) {
         setState({
           address: accounts[0],
           isConnected: true,
           isConnecting: false,
           error: null,
         });
+      } else {
+        setState({
+          address: null,
+          isConnected: false,
+          isConnecting: false,
+          error: 'No accounts found in wallet.',
+        });
       }
     } catch (error: any) {
-      setState({
-        address: null,
-        isConnected: false,
-        isConnecting: false,
-        error: error?.message || 'Failed to connect wallet',
-      });
+      console.error('Wallet connection error:', error);
+      
+      // Handle specific error cases
+      if (error.code === 4001) {
+        setState({
+          address: null,
+          isConnected: false,
+          isConnecting: false,
+          error: 'Connection request was rejected. Please try again.',
+        });
+      } else if (error.message === 'Connection timeout') {
+        // Retry once on timeout
+        if (retryCount < 1) {
+          console.log('Retrying wallet connection...');
+          setTimeout(() => connect(retryCount + 1), 1000);
+          return;
+        }
+        
+        setState({
+          address: null,
+          isConnected: false,
+          isConnecting: false,
+          error: 'Connection timed out after retry. Browser extension interference detected. Please try: 1) Use incognito mode, 2) Disable other extensions, or 3) Try a different browser.',
+        });
+      } else if (error.message?.includes('chrome-extension')) {
+        setState({
+          address: null,
+          isConnected: false,
+          isConnecting: false,
+          error: 'Browser extension interference detected. The extension "bfnaelmomeimhlpmgjnjophhpkkoljpa" is conflicting with wallet connection. Try incognito mode or disable this extension.',
+        });
+      } else {
+        setState({
+          address: null,
+          isConnected: false,
+          isConnecting: false,
+          error: error?.message || 'Failed to connect wallet. Try disabling conflicting browser extensions.',
+        });
+      }
     }
   };
 

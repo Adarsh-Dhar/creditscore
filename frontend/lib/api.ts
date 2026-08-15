@@ -9,20 +9,35 @@ export class ApiError extends Error {
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_URL}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
 
-  if (!response.ok) {
-    const error = await response.text().catch(() => 'Unknown error');
-    throw new ApiError(error || `HTTP ${response.status}`, response.status);
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new ApiError(`API endpoint not found. Make sure the backend server is running on ${API_URL}. Start it with: ./start-api.sh`, response.status);
+      }
+      const error = await response.text().catch(() => 'Unknown error');
+      throw new ApiError(error || `HTTP ${response.status}`, response.status);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    // Handle network errors or fetch failures
+    if (error instanceof TypeError) {
+      throw new ApiError(`Cannot connect to API server at ${API_URL}. Start the backend with: cd api && pnpm run dev`, 0);
+    }
+    throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0);
   }
-
-  return response.json();
 }
 
 export interface HealthResponse {

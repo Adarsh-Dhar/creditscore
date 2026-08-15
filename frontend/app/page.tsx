@@ -66,8 +66,8 @@ function ScoreRing({ score, maxScore }: { score: number; maxScore: number }) {
   )
 }
 
-function LoadingSpinner() {
-  return <Loader2 className="spin" size={16} />
+function LoadingSpinner({ size = 24 }: { size?: number }) {
+  return <Loader2 className="spin" size={size} />
 }
 
 function ErrorBanner({ error, onRetry }: { error: string; onRetry: () => void }) {
@@ -140,10 +140,11 @@ export default function Page() {
         setChainsData(chainsRes.chains)
         setErrors(prev => ({ ...prev, weights: null, chains: null }))
       } catch (e: any) {
+        const errorMsg = e instanceof ApiError ? e.message : 'Failed to connect to API'
         setErrors(prev => ({ 
           ...prev, 
-          weights: e instanceof ApiError ? e.message : 'Failed to load weights',
-          chains: e instanceof ApiError ? e.message : 'Failed to load chain status',
+          weights: errorMsg,
+          chains: errorMsg,
         }))
       } finally {
         setLoading(prev => ({ ...prev, weights: false, chains: false }))
@@ -351,7 +352,7 @@ export default function Page() {
           {navItems.map(({ label, icon: Icon }) => (
             <button key={label} className={`nav-item ${activeNav === label ? 'nav-item-active' : ''}`} onClick={() => { setActiveNav(label); setMobileOpen(false) }}>
               <Icon size={18} /> {label}
-              {label === 'Activity' && summary?.unprovenCount > 0 && (
+              {label === 'Activity' && summary && summary.unprovenCount > 0 && (
                 <span className="nav-count">{summary.unprovenCount}</span>
               )}
             </button>
@@ -383,7 +384,7 @@ export default function Page() {
             </div>
           ) : (
             <button className="connect-button" onClick={connect} disabled={isConnecting}>
-              {isConnecting ? <LoadingSpinner /> : <Wallet size={16} />}
+              {isConnecting ? <LoadingSpinner size={16} /> : <Wallet size={16} />}
               {isConnecting ? 'Connecting...' : 'Connect wallet'}
             </button>
           )}
@@ -422,21 +423,41 @@ export default function Page() {
               </button>
             ) : (
               <button className="connect-button compact" onClick={connect} disabled={isConnecting}>
-                {isConnecting ? <LoadingSpinner /> : <Wallet size={14} />}
+                {isConnecting ? <LoadingSpinner size={16} /> : <Wallet size={14} />}
               </button>
             )}
           </div>
         </header>
 
         <div className="dashboard-content">
+          {errors.weights && errors.weights.includes('API') && (
+            <div className="error-banner">
+              <AlertCircle size={16} />
+              <span>{errors.weights}</span>
+              <button className="text-button" onClick={() => window.open('http://localhost:3002/api/health', '_blank')}>
+                Check API status
+              </button>
+            </div>
+          )}
+          
           {walletError && (
             <div className="error-banner">
               <AlertCircle size={16} />
               <span>{walletError}</span>
+              {walletError.includes('extension') && (
+                <>
+                  <button className="text-button" onClick={() => window.open('about:extensions', '_blank')}>
+                    Manage extensions
+                  </button>
+                  <button className="text-button" onClick={() => window.open(window.location.href, '_blank', 'noopener,noreferrer,private')}>
+                    Try incognito
+                  </button>
+                </>
+              )}
             </div>
           )}
 
-          {summary?.unprovenCount > 0 && (
+          {summary && summary.unprovenCount > 0 && (
             <div className="status-banner warning">
               <div className="status-icon"><AlertCircle size={19} /></div>
               <div>
@@ -466,7 +487,7 @@ export default function Page() {
                           <h2>On-chain reputation</h2>
                         </div>
                         <button className="refresh-button" aria-label="Refresh score" onClick={handleRefresh} disabled={loading.summary}>
-                          {loading.summary ? <LoadingSpinner /> : <RefreshCw size={16} />}
+                          {loading.summary ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
                           {loading.summary ? 'Loading...' : 'Refresh'}
                         </button>
                       </div>
@@ -526,7 +547,7 @@ export default function Page() {
                         </div>
                         <div>
                           <span>Unproven</span>
-                          <strong>{summary?.unprovenCount || 0}</strong>
+                          <strong>{summary ? summary.unprovenCount : 0}</strong>
                         </div>
                       </div>
                       <button className="outline-button">
@@ -658,7 +679,7 @@ export default function Page() {
                         <option value="LiquidationCall">Liquidation</option>
                       </select>
                       <button className="refresh-button" onClick={handleRefresh} disabled={loading.events}>
-                        {loading.events ? <LoadingSpinner /> : <RefreshCw size={16} />}
+                        {loading.events ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
                       </button>
                     </div>
                   </div>
@@ -727,7 +748,7 @@ export default function Page() {
                   <h2>Top wallets by score</h2>
                 </div>
                 <button className="refresh-button" onClick={loadLeaderboard} disabled={loading.leaderboard}>
-                  {loading.leaderboard ? <LoadingSpinner /> : <RefreshCw size={16} />}
+                  {loading.leaderboard ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
                 </button>
               </div>
               
