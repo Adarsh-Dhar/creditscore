@@ -131,6 +131,25 @@ verified via Attestcoin and reflected on Creditcoin.
 npm run check-score
 ```
 
+### 7. (Optional) Prove a batch of queued events
+
+If you've run the indexer (`npm run index` in `indexer/`) and it found
+multiple unproven Aave events across wallets, you don't have to prove them
+one at a time by hand. Instead:
+
+```bash
+npm run prove-queue
+```
+
+This pulls up to `PROVE_BATCH_SIZE` (default 10, set in `.env`) unproven
+events from the indexer's Postgres database, oldest block first, and proves
+each one using its own wallet and event type — no `SOURCE_TX_HASH` /
+`TARGET_WALLET` needed for this path. Each event is marked proven in
+Postgres immediately after a successful on-chain submission. If one event
+fails, it's logged and the run continues with the rest of the batch (no
+retry/backoff — this is still a manually- or cron-triggered script, not a
+long-running service).
+
 ---
 
 ## If something breaks

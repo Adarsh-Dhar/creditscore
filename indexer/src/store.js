@@ -55,6 +55,24 @@ async function saveEvent(eventData) {
   });
 }
 
+async function loadUnprovenEvents(limit = 10) {
+  return await prisma.indexedEvent.findMany({
+    where: { proven: false },
+    orderBy: [
+      { blockNumber: 'asc' },
+      { logIndex: 'asc' },
+    ],
+    take: limit,
+  });
+}
+
+async function markProven(txHash) {
+  await prisma.indexedEvent.updateMany({
+    where: { txHash },
+    data: { proven: true },
+  });
+}
+
 async function getSeenKeys() {
   const events = await prisma.indexedEvent.findMany({
     select: {
@@ -74,7 +92,9 @@ module.exports = {
   loadCheckpoint,
   saveCheckpoint,
   loadEvents,
+  loadUnprovenEvents,
   saveEvent,
+  markProven,
   getSeenKeys,
   disconnect,
 };
