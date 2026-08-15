@@ -5,7 +5,9 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
 
 module.exports = {
   solidity: {
-    version: "0.8.20",
+    // 0.8.23 is required by @gluwa/usc-contracts' EvmV1Decoder.sol, which
+    // CreditScoreMVP.sol now imports for on-chain event-type decoding.
+    version: "0.8.23",
     settings: {
       optimizer: {
         enabled: true,

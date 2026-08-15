@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.23;
 
 import {INativeQueryVerifier, NativeQueryVerifierLib} from "@gluwa/usc-contracts/contracts/write-ability/INativeQueryVerifier.sol";
+import {EvmV1Decoder} from "@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol";
 
 /// @title INativeQueryVerifierBatch
 /// @notice Full interface for batch verification, including the batch verify overload
@@ -27,11 +28,18 @@ interface INativeQueryVerifierBatch {
 /// @title CreditScoreMVP
 /// @notice Proof-of-concept: tracks per-action-type verified event counts per
 /// wallet, and computes a weighted score as a view over that state.
-/// Event type, wallet, and amount are supplied off-chain — Attestcoin only
-/// proves the underlying transaction occurred, it doesn't know what an
-/// "Aave Supply" is. Same trust model as before, just richer state.
+/// Wallet address is still supplied off-chain (Attestcoin doesn't infer who
+/// should be credited). Event type is decoded on-chain from the verified
+/// transaction's own calldata via EvmV1Decoder — not trusted from the
+/// caller — so a proven event is trustless both in "it happened" and in
+/// "this is what it was."
 contract CreditScoreMVP {
     INativeQueryVerifier public immutable VERIFIER;
+
+    /// @notice Aave V3 Pool on Ethereum Sepolia. Only transactions sent to
+    /// this address are ever credited — decoded from the verified tx itself,
+    /// not trusted from the caller. Update if Aave redeploys.
+    address public constant AAVE_V3_SEPOLIA_POOL = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
 
     // Must match the indexer's EVENT_NAMES order exactly:
     // ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"]
@@ -62,6 +70,14 @@ contract CreditScoreMVP {
     mapping(address => WalletStats) public stats;
     mapping(bytes32 => bool) public provenTxHashes;
 
+    // Aave V3 Pool function selectors — keccak256(signature)[:4]. These are
+    // the only actions this contract will ever credit; anything else reverts.
+    bytes4 constant SEL_SUPPLY = 0x617ba037;           // supply(address,uint256,address,uint16)
+    bytes4 constant SEL_BORROW = 0xa415bcad;            // borrow(address,uint256,uint256,uint16,address)
+    bytes4 constant SEL_REPAY = 0x573ade81;             // repay(address,uint256,uint256,address)
+    bytes4 constant SEL_WITHDRAW = 0x69328dec;          // withdraw(address,uint256,address)
+    bytes4 constant SEL_LIQUIDATION_CALL = 0x00a718a9;  // liquidationCall(address,address,address,uint256,bool)
+
     event LoanEventProven(
         address indexed wallet,
         uint256 chainKey,
@@ -74,6 +90,31 @@ contract CreditScoreMVP {
         VERIFIER = NativeQueryVerifierLib.getVerifier(); // resolves to the 0x0FD2 precompile
     }
 
+    /// @notice Derives the EventType from the verified transaction's own
+    /// calldata — never from a caller-supplied parameter. Also enforces that
+    /// the transaction actually targeted the Aave Pool. This is what makes
+    /// the credited event type as trustless as the "it happened" fact is.
+    function _decodeEventType(bytes memory encodedTx) internal pure returns (EventType) {
+        EvmV1Decoder.CommonTxFields memory common = EvmV1Decoder.decodeCommonTxFields(encodedTx);
+
+        require(!common.toIsNull, "tx has no recipient");
+        require(common.to == AAVE_V3_SEPOLIA_POOL, "not an Aave Pool transaction");
+        require(common.data.length >= 4, "calldata too short to contain a selector");
+
+        bytes4 selector;
+        bytes memory data = common.data;
+        assembly {
+            selector := mload(add(data, 32))
+        }
+
+        if (selector == SEL_SUPPLY) return EventType.Supply;
+        if (selector == SEL_BORROW) return EventType.Borrow;
+        if (selector == SEL_REPAY) return EventType.Repay;
+        if (selector == SEL_WITHDRAW) return EventType.Withdraw;
+        if (selector == SEL_LIQUIDATION_CALL) return EventType.LiquidationCall;
+        revert("unrecognized Aave Pool selector");
+    }
+
     function proveLoanEvent(
         address wallet,
         uint64 chainKey,
@@ -84,7 +125,7 @@ contract CreditScoreMVP {
         bytes32 lowerEndpointDigest,
         bytes32[] calldata continuityRoots,
         bytes32 txHashKey,
-        EventType eventType
+        EventType claimedEventType
     ) external {
         require(!provenTxHashes[txHashKey], "already proven");
 
@@ -96,9 +137,16 @@ contract CreditScoreMVP {
         bool verified = VERIFIER.verify(chainKey, blockHeight, encodedTx, merkleProof, continuityProof);
         require(verified, "verification failed");
 
+        // Trustless: derived from the verified tx's own calldata, not from
+        // the caller's claim. The claimed value must match — a mismatch
+        // means the indexer/off-chain script is wrong, not that we should
+        // silently trust it.
+        EventType actualEventType = _decodeEventType(encodedTx);
+        require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
+
         provenTxHashes[txHashKey] = true;
-        _creditWallet(wallet, eventType);
-        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, eventType);
+        _creditWallet(wallet, actualEventType);
+        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, actualEventType);
     }
 
     /// @notice Batch version of proveLoanEvent - proves multiple events in a single transaction
@@ -148,12 +196,35 @@ contract CreditScoreMVP {
         );
         require(verified, "Batch verification failed");
 
-        // Credit each wallet individually after successful batch verification
+        // Credit each wallet individually after successful batch verification.
+        // eventType is derived per-tx from the verified calldata, exactly as
+        // in the single-event path — batching doesn't relax the trust model.
+        // Delegated to a helper (rather than inlined) to keep this function's
+        // stack frame small under viaIR — inlining the decode call here
+        // overflows the Yul stack given how many parameters/locals this
+        // function already carries.
         for (uint i = 0; i < wallets.length; i++) {
-            provenTxHashes[txHashKeys[i]] = true;
-            _creditWallet(wallets[i], eventTypes[i]);
-            emit LoanEventProven(wallets[i], chainKey, heights[i], txHashKeys[i], eventTypes[i]);
+            _creditBatchEvent(wallets[i], eventTypes[i], txHashKeys[i], chainKey, heights[i], encodedTxs[i]);
         }
+    }
+
+    /// @notice Per-item work for a single batch entry: decode, check claim,
+    /// mark proven, credit, emit. Split out of proveLoanEventsBatch's loop
+    /// purely to keep that function's stack frame under the Yul limit.
+    function _creditBatchEvent(
+        address wallet,
+        EventType claimedEventType,
+        bytes32 txHashKey,
+        uint64 chainKey,
+        uint64 height,
+        bytes calldata encodedTx
+    ) internal {
+        EventType actualEventType = _decodeEventType(encodedTx);
+        require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
+
+        provenTxHashes[txHashKey] = true;
+        _creditWallet(wallet, actualEventType);
+        emit LoanEventProven(wallet, chainKey, height, txHashKey, actualEventType);
     }
 
     /// @notice Internal helper to credit a wallet based on event type
