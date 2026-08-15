@@ -3,6 +3,27 @@ pragma solidity ^0.8.20;
 
 import {INativeQueryVerifier, NativeQueryVerifierLib} from "@gluwa/usc-contracts/contracts/write-ability/INativeQueryVerifier.sol";
 
+/// @title INativeQueryVerifierBatch
+/// @notice Full interface for batch verification, including the batch verify overload
+/// The usc-contracts package only includes the lean single-tx interface,
+/// so we extend it here to support batch verification.
+interface INativeQueryVerifierBatch {
+    /// @notice Verify a batch of transactions with a shared continuity proof
+    /// @param chainKey Chain identifier
+    /// @param heights Array of block heights for each transaction
+    /// @param encodedTxs Array of encoded transaction bytes
+    /// @param merkleProofs Array of Merkle proofs for each transaction
+    /// @param sharedContinuityProof Single continuity proof shared across all transactions
+    /// @return bool True if all transactions are verified
+    function verify(
+        uint64 chainKey,
+        uint64[] calldata heights,
+        bytes[] calldata encodedTxs,
+        INativeQueryVerifier.MerkleProof[] calldata merkleProofs,
+        INativeQueryVerifier.ContinuityProof calldata sharedContinuityProof
+    ) external view returns (bool);
+}
+
 /// @title CreditScoreMVP
 /// @notice Proof-of-concept: tracks per-action-type verified event counts per
 /// wallet, and computes a weighted score as a view over that state.
@@ -76,7 +97,68 @@ contract CreditScoreMVP {
         require(verified, "verification failed");
 
         provenTxHashes[txHashKey] = true;
+        _creditWallet(wallet, eventType);
+        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, eventType);
+    }
 
+    /// @notice Batch version of proveLoanEvent - proves multiple events in a single transaction
+    /// @dev All events in the batch must be from the same chain (same chainKey)
+    /// @param wallets Array of wallet addresses to credit
+    /// @param eventTypes Array of event types for each wallet
+    /// @param txHashKeys Array of keccak256(txHash) for deduplication
+    /// @param chainKey Chain identifier (must be the same for all events)
+    /// @param heights Array of block heights for each transaction
+    /// @param encodedTxs Array of encoded transaction bytes
+    /// @param merkleProofs Array of Merkle proofs for each transaction
+    /// @param sharedContinuityProof Single continuity proof shared across all transactions
+    function proveLoanEventsBatch(
+        address[] calldata wallets,
+        EventType[] calldata eventTypes,
+        bytes32[] calldata txHashKeys,
+        uint64 chainKey,
+        uint64[] calldata heights,
+        bytes[] calldata encodedTxs,
+        INativeQueryVerifier.MerkleProof[] calldata merkleProofs,
+        INativeQueryVerifier.ContinuityProof calldata sharedContinuityProof
+    ) external {
+        require(
+            wallets.length == eventTypes.length &&
+            wallets.length == txHashKeys.length &&
+            wallets.length == heights.length &&
+            wallets.length == encodedTxs.length &&
+            wallets.length == merkleProofs.length,
+            "Array length mismatch"
+        );
+        require(wallets.length > 0, "Empty batch");
+        require(wallets.length <= 10, "Batch too large - max 10 events");
+
+        // Check for already-proven transactions (cannot bypass deduplication)
+        for (uint i = 0; i < txHashKeys.length; i++) {
+            require(!provenTxHashes[txHashKeys[i]], "Transaction already proven");
+        }
+
+        // Verify the entire batch with a single continuity proof
+        INativeQueryVerifierBatch batchVerifier = INativeQueryVerifierBatch(address(VERIFIER));
+        bool verified = batchVerifier.verify(
+            chainKey,
+            heights,
+            encodedTxs,
+            merkleProofs,
+            sharedContinuityProof
+        );
+        require(verified, "Batch verification failed");
+
+        // Credit each wallet individually after successful batch verification
+        for (uint i = 0; i < wallets.length; i++) {
+            provenTxHashes[txHashKeys[i]] = true;
+            _creditWallet(wallets[i], eventTypes[i]);
+            emit LoanEventProven(wallets[i], chainKey, heights[i], txHashKeys[i], eventTypes[i]);
+        }
+    }
+
+    /// @notice Internal helper to credit a wallet based on event type
+    /// @dev Extracted from proveLoanEvent to avoid code duplication
+    function _creditWallet(address wallet, EventType eventType) internal {
         WalletStats storage s = stats[wallet];
         if (eventType == EventType.Supply) {
             s.supplyCount += 1;
@@ -89,8 +171,6 @@ contract CreditScoreMVP {
         } else if (eventType == EventType.LiquidationCall) {
             s.liquidationCount += 1;
         }
-
-        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, eventType);
     }
 
     /// @notice Weighted score, floored at 0. Same external signature as

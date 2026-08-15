@@ -1,28 +1,24 @@
 /**
  * proveQueue.js
  *
- * Phase 2 item 4: same proof/submit mechanism as generateAndSubmitProof.js,
- * looped over the indexer's backlog instead of one .env-configured tx at a
- * time.
+ * Production-level batch proof processing for the indexer's backlog.
  *
  *  1. Pull up to PROVE_BATCH_SIZE (default 10) unproven events from the
  *     indexer's Postgres database (oldest block first).
- *  2. For each, run the same prove-and-submit flow as the single-tx script,
- *     using that event's own wallet + event type (not a single TARGET_WALLET
- *     / SOURCE_TX_HASH from .env).
- *  3. Mark each proven in Postgres immediately on success, so a mid-run
+ *  2. Group events by chain (batches cannot cross chains).
+ *  3. For each chain group, generate a shared batch proof and submit
+ *     all events in a single on-chain transaction via proveLoanEventsBatch.
+ *  4. Mark each proven in Postgres immediately on success, so a mid-run
  *     crash doesn't re-prove or lose progress on the ones that already went
  *     through.
  *
- * Deliberately un-production, matching phase 2 item 5:
- *  - No retry/backoff on failure here — one bad event is logged and skipped,
- *    the rest of the batch keeps going. (The indexer's own retry/backoff on
- *    RPC rate limiting is unrelated and untouched.)
- *  - Not a long-running service — trigger manually or via cron
- *    (npm run prove-queue).
- *  - "Batch" means this script looping single-tx proveLoanEvent() calls, not
- *    a new on-chain batch-submit contract method — see CreditScoreMVP.sol,
- *    unchanged.
+ * Production features:
+ *  - Uses efficient batch proof generation (getBatchProof) with shared
+ *    continuity proof across multiple transactions
+ *  - Groups events by chain to respect batch limitations
+ *  - Single on-chain transaction per chain group (significant gas savings)
+ *  - Proper error handling with detailed logging
+ *  - Maintains per-tx deduplication checks
  *
  * Usage:
  *   npm run prove-queue                      # prove up to PROVE_BATCH_SIZE (default 10)
@@ -30,18 +26,49 @@
  */
 
 require("dotenv").config();
+const { processBatch } = require("./lib/proveBatch");
 const { proveTransaction } = require("./lib/proveTransaction");
 const { EVENT_TYPE_INDEX } = require("./lib/eventTypes");
 const { loadUnprovenEvents, markProven, disconnect } = require("../indexer/src/store");
 
 const BATCH_SIZE = Number(process.env.PROVE_BATCH_SIZE || 10);
 
-async function main() {
-  const { SEPOLIA_RPC, CC3_TESTNET_RPC, PROVER_API_URL, PRIVATE_KEY, CONTRACT_ADDRESS } = process.env;
+/**
+ * Group events by chain name
+ * @param {Array} events - Array of events with chain property
+ * @returns {Object} Events grouped by chain
+ */
+function groupByChain(events) {
+  const grouped = {};
+  for (const event of events) {
+    if (!grouped[event.chain]) {
+      grouped[event.chain] = [];
+    }
+    grouped[event.chain].push(event);
+  }
+  return grouped;
+}
 
-  if (!SEPOLIA_RPC || !CC3_TESTNET_RPC || !PRIVATE_KEY || !CONTRACT_ADDRESS) {
+/**
+ * Get RPC URL for a given chain
+ * @param {string} chain - Chain name (e.g., "sepolia")
+ * @returns {string} RPC URL from environment
+ */
+function getRpcForChain(chain) {
+  const envVar = `${chain.toUpperCase()}_RPC`;
+  const rpcUrl = process.env[envVar];
+  if (!rpcUrl) {
+    throw new Error(`Missing ${envVar} in .env for chain ${chain}`);
+  }
+  return rpcUrl;
+}
+
+async function main() {
+  const { CC3_TESTNET_RPC, PROVER_API_URL, PRIVATE_KEY, CONTRACT_ADDRESS } = process.env;
+
+  if (!CC3_TESTNET_RPC || !PRIVATE_KEY || !CONTRACT_ADDRESS) {
     throw new Error(
-      "Missing required .env values (SEPOLIA_RPC, CC3_TESTNET_RPC, PRIVATE_KEY, CONTRACT_ADDRESS) — check .env.example."
+      "Missing required .env values (CC3_TESTNET_RPC, PRIVATE_KEY, CONTRACT_ADDRESS) — check .env.example."
     );
   }
   const proverApiUrl = PROVER_API_URL || "https://prover.cc3-testnet.creditcoin.network";
@@ -60,52 +87,114 @@ async function main() {
     return;
   }
 
-  console.log(`Found ${events.length} unproven event(s) — proving up to ${BATCH_SIZE} this run.`);
+  console.log(`Found ${events.length} unproven event(s) — processing in batches of up to ${BATCH_SIZE}.`);
+
+  // Group events by chain
+  const eventsByChain = groupByChain(events);
+  console.log(`Events grouped by chain: ${Object.keys(eventsByChain).join(", ")}`);
 
   const results = { proven: [], skipped: [], failed: [] };
 
-  for (const event of events) {
-    console.log(`\n--- ${event.eventName} | wallet=${event.wallet} | tx=${event.txHash} ---`);
-
-    const eventType = EVENT_TYPE_INDEX[event.eventName];
-    if (eventType === undefined) {
-      const msg = `unrecognized eventName "${event.eventName}"`;
-      console.error(`  ! ${msg}, skipping.`);
-      results.failed.push({ txHash: event.txHash, error: msg });
-      continue; // no retry/backoff by design — move on to the next event
-    }
+  // Process each chain group
+  for (const [chain, chainEvents] of Object.entries(eventsByChain)) {
+    console.log(`\n=== Processing ${chainEvents.length} event(s) from ${chain} ===`);
 
     try {
-      const result = await proveTransaction({
-        sourceTxHash: event.txHash,
-        targetWallet: event.wallet,
-        eventType,
-        sepoliaRpc: SEPOLIA_RPC,
-        cc3TestnetRpc: CC3_TESTNET_RPC,
-        proverApiUrl,
-        privateKey: PRIVATE_KEY,
-        contractAddress: CONTRACT_ADDRESS,
-        log: (msg) => console.log(msg),
-      });
+      const chainRpc = getRpcForChain(chain);
 
-      // Mark proven in Postgres right away — on-chain state and DB state
-      // should never drift apart just because a later event in this batch
-      // fails.
-      await markProven(event.txHash);
-
-      if (result.alreadyProven) {
-        console.log(`  already proven on-chain — marked proven in DB.`);
-        results.skipped.push(event.txHash);
-      } else {
-        console.log(`  ✅ proven. score ${result.scoreBefore} -> ${result.scoreAfter}`);
-        results.proven.push(event.txHash);
+      // Validate event types
+      const validEvents = [];
+      for (const event of chainEvents) {
+        const eventType = EVENT_TYPE_INDEX[event.eventName];
+        if (eventType === undefined) {
+          const msg = `unrecognized eventName "${event.eventName}"`;
+          console.error(`  ! ${msg} for tx ${event.txHash}, skipping.`);
+          results.failed.push({ txHash: event.txHash, error: msg });
+        } else {
+          validEvents.push({ ...event, eventType });
+        }
       }
+
+      if (validEvents.length === 0) {
+        console.log(`  No valid events to process for ${chain}.`);
+        continue;
+      }
+
+      // Process batch for this chain
+      let batchResult;
+      try {
+        batchResult = await processBatch(validEvents, {
+          chain,
+          sepoliaRpc: chainRpc,
+          cc3TestnetRpc: CC3_TESTNET_RPC,
+          proverApiUrl,
+          privateKey: PRIVATE_KEY,
+          contractAddress: CONTRACT_ADDRESS,
+          log: (msg) => console.log(msg),
+        });
+      } catch (batchError) {
+        console.log(`  ! batch processing failed, falling back to individual proofs: ${batchError.message}`);
+        
+        // Fallback to individual transaction proofs
+        for (const event of validEvents) {
+          try {
+            console.log(`  processing individual tx: ${event.txHash.substring(0, 10)}...`);
+            const result = await proveTransaction({
+              sourceTxHash: event.txHash,
+              targetWallet: event.wallet,
+              eventType: event.eventType,
+              sepoliaRpc: chainRpc,
+              cc3TestnetRpc: CC3_TESTNET_RPC,
+              proverApiUrl,
+              privateKey: PRIVATE_KEY,
+              contractAddress: CONTRACT_ADDRESS,
+              log: (msg) => console.log(`    ${msg}`),
+            });
+
+            await markProven(event.txHash);
+
+            if (result.alreadyProven) {
+              console.log(`    already proven on-chain — marked proven in DB.`);
+              results.skipped.push(event.txHash);
+            } else {
+              console.log(`    ✅ proven. score ${result.scoreBefore} -> ${result.scoreAfter}`);
+              results.proven.push(event.txHash);
+            }
+          } catch (individualError) {
+            console.error(`    ! individual proof failed: ${individualError.message}`);
+            results.failed.push({ txHash: event.txHash, error: individualError.message });
+          }
+        }
+        continue; // Skip the batch result processing since we handled individually
+      }
+
+      // Mark all processed events as proven in Postgres
+      if (batchResult.processed > 0) {
+        for (const event of validEvents) {
+          await markProven(event.txHash);
+          results.proven.push(event.txHash);
+        }
+        console.log(`  ✅ batch processed: ${batchResult.processed} event(s)`);
+        if (batchResult.gasUsed) {
+          console.log(`  gas used: ${batchResult.gasUsed}`);
+        }
+      }
+
+      if (batchResult.skipped > 0) {
+        for (const event of validEvents) {
+          await markProven(event.txHash);
+          results.skipped.push(event.txHash);
+        }
+        console.log(`  ⏭️ skipped: ${batchResult.skipped} already proven event(s)`);
+      }
+
     } catch (err) {
-      console.error(`  ! failed: ${err.message}`);
-      results.failed.push({ txHash: event.txHash, error: err.message });
-      // Deliberately no retry/backoff here (phase 2 item 5) — log and
-      // continue to the next event rather than let one bad event stall
-      // the whole batch.
+      console.error(`  ! batch processing failed for ${chain}: ${err.message}`);
+      // Mark all events in this chain group as failed
+      for (const event of chainEvents) {
+        results.failed.push({ txHash: event.txHash, error: err.message });
+      }
+      // Continue with other chains even if one fails
     }
   }
 
@@ -114,6 +203,7 @@ async function main() {
   console.log(`Skipped (already proven): ${results.skipped.length}`);
   console.log(`Failed:  ${results.failed.length}`);
   if (results.failed.length > 0) {
+    console.log(`Failed transactions:`);
     for (const f of results.failed) console.log(`  ${f.txHash}: ${f.error}`);
   }
 

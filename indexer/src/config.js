@@ -1,7 +1,20 @@
-// Same address generateAndSubmitProof.js checks against in the main repo —
-// keep these in sync if Aave redeploys on Sepolia.
-// Confirm against https://github.com/bgd-labs/aave-address-book if unsure.
-const AAVE_V3_SEPOLIA_POOL = "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951";
+// Chain configuration for multi-chain support
+// Each chain entry defines the RPC URL, pool address, and chain ID for that network
+const CHAINS = [
+  {
+    name: "sepolia",
+    rpcEnvVar: "SEPOLIA_RPC",
+    poolAddress: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+    numericChainId: 11155111, // Ethereum Sepolia chain ID
+  },
+  // Future chains can be added here:
+  // {
+  //   name: "base-sepolia",
+  //   rpcEnvVar: "BASE_SEPOLIA_RPC",
+  //   poolAddress: "0x...",
+  //   numericChainId: 84532,
+  // },
+];
 
 // Only the events the indexer cares about. Fragments taken from Aave V3's
 // IPool — double check against the current aave-v3-core ABI if these error.
@@ -17,4 +30,4 @@ const EVENT_NAMES = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"]
 
 const CHUNK_SIZE = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
 
-module.exports = { AAVE_V3_SEPOLIA_POOL, POOL_EVENT_ABI, EVENT_NAMES, CHUNK_SIZE };
+module.exports = { CHAINS, POOL_EVENT_ABI, EVENT_NAMES, CHUNK_SIZE };
