@@ -1,13 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+interface EIP1193Provider {
+  isMetaMask?: boolean;
+  request: (args: { method: string; params?: any[] }) => Promise<any>;
+  on: (event: string, handler: (accounts: string[]) => void) => void;
+  removeListener: (event: string, handler: (accounts: string[]) => void) => void;
+}
+
+interface EIP6963ProviderDetail {
+  info: { uuid: string; name: string; icon: string; rdns: string };
+  provider: EIP1193Provider;
+}
 
 declare global {
   interface Window {
-    ethereum?: {
-      isMetaMask?: boolean;
-      request: (args: { method: string; params?: any[] }) => Promise<any>;
-      on: (event: string, handler: (accounts: string[]) => void) => void;
-      removeListener: (event: string, handler: (accounts: string[]) => void) => void;
-    };
+    ethereum?: EIP1193Provider;
+  }
+  interface WindowEventMap {
+    'eip6963:announceProvider': CustomEvent<EIP6963ProviderDetail>;
   }
 }
 
@@ -18,6 +28,71 @@ export interface WalletState {
   error: string | null;
 }
 
+// Wallet extensions (Phantom, etc.) inject scripts that listen for the
+// EIP-6963 request event below and can throw internally when responding.
+// Those errors originate entirely inside the extension's own script context
+// — we never touch that code and can't fix it — so we filter them out of
+// the console/dev-overlay instead of leaving real app errors mixed in with
+// noise we don't control. Anything not from a chrome-extension:// source is
+// left completely untouched.
+function isExtensionOriginError(source: string | undefined): boolean {
+  return !!source && source.startsWith('chrome-extension://');
+}
+
+function suppressExtensionErrors() {
+  const onError = (event: ErrorEvent) => {
+    if (isExtensionOriginError(event.filename)) {
+      event.preventDefault();
+    }
+  };
+  const onRejection = (event: PromiseRejectionEvent) => {
+    const stack: string | undefined = event.reason?.stack;
+    if (stack && stack.includes('chrome-extension://')) {
+      event.preventDefault();
+    }
+  };
+
+  window.addEventListener('error', onError);
+  window.addEventListener('unhandledrejection', onRejection);
+  return () => {
+    window.removeEventListener('error', onError);
+    window.removeEventListener('unhandledrejection', onRejection);
+  };
+}
+
+// Collects every wallet extension announced on the page via EIP-6963,
+// instead of relying on window.ethereum, which any single extension
+// (e.g. Phantom) can silently claim/overwrite and which may be broken.
+function useDiscoveredProviders() {
+  const providersRef = useRef<Map<string, EIP1193Provider>>(new Map());
+
+  useEffect(() => {
+    const removeSuppressor = suppressExtensionErrors();
+    const onAnnounce = (event: WindowEventMap['eip6963:announceProvider']) => {
+      providersRef.current.set(event.detail.info.rdns, event.detail.provider);
+    };
+    window.addEventListener('eip6963:announceProvider', onAnnounce);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    return () => {
+      window.removeEventListener('eip6963:announceProvider', onAnnounce);
+      removeSuppressor();
+    };
+  }, []);
+
+  // Ordered candidate list: all EIP-6963 announced providers first,
+  // then window.ethereum as a last-resort fallback for older wallets
+  // that don't support EIP-6963 yet.
+  const getCandidates = (): EIP1193Provider[] => {
+    const list = Array.from(providersRef.current.values());
+    if (window.ethereum && !list.includes(window.ethereum)) {
+      list.push(window.ethereum);
+    }
+    return list;
+  };
+
+  return { getCandidates };
+}
+
 export function useWallet() {
   const [state, setState] = useState<WalletState>({
     address: null,
@@ -25,40 +100,44 @@ export function useWallet() {
     isConnecting: false,
     error: null,
   });
+  const { getCandidates } = useDiscoveredProviders();
+  const activeProviderRef = useRef<EIP1193Provider | null>(null);
 
   useEffect(() => {
-    // Check if wallet is already connected on mount
+    // Check if wallet is already connected on mount. Try every discovered
+    // provider (not just window.ethereum) so a broken/unrelated extension
+    // can't block detection of an already-connected wallet.
     const checkConnection = async () => {
-      if (window.ethereum) {
+      for (const provider of getCandidates()) {
         try {
-          // Skip the automatic check if extensions are interfering
-          // Users can manually connect via the button
           const accounts = await Promise.race([
-            window.ethereum.request({ method: 'eth_accounts' }),
-            new Promise((_, reject) => 
+            provider.request({ method: 'eth_accounts' }),
+            new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Connection check timeout')), 2000)
             )
           ]) as string[];
-          
+
           if (accounts && accounts.length > 0) {
+            activeProviderRef.current = provider;
             setState({
               address: accounts[0],
               isConnected: true,
               isConnecting: false,
               error: null,
             });
+            return;
           }
         } catch (error) {
-          // Silently fail on initial check - don't bother user with extension errors
-          // They can manually connect if needed
-          console.log('Wallet check skipped (likely extension interference)');
+          // This provider failed or isn't connected - move on to the next one.
+          console.log('Wallet check skipped for a provider (unavailable or interfering)');
         }
       }
     };
 
     checkConnection();
 
-    // Listen for account changes
+    // Listen for account changes on every discovered provider - whichever
+    // one the user ends up connected with will fire this.
     const handleAccountsChanged = (accounts: string[]) => {
       if (accounts.length === 0) {
         setState({
@@ -77,19 +156,18 @@ export function useWallet() {
       }
     };
 
-    if (window.ethereum) {
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-    }
+    const candidates = getCandidates();
+    candidates.forEach(provider => provider.on('accountsChanged', handleAccountsChanged));
 
     return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-      }
+      candidates.forEach(provider => provider.removeListener('accountsChanged', handleAccountsChanged));
     };
   }, [state.address]);
 
-  const connect = async (retryCount = 0) => {
-    if (!window.ethereum) {
+  const connect = async () => {
+    const candidates = getCandidates();
+
+    if (candidates.length === 0) {
       setState({
         address: null,
         isConnected: false,
@@ -101,74 +179,71 @@ export function useWallet() {
 
     setState(prev => ({ ...prev, isConnecting: true, error: null }));
 
-    try {
-      // Try to request accounts with a longer timeout and retry mechanism
-      const accounts = await Promise.race([
-        window.ethereum.request({ method: 'eth_requestAccounts' }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 15000)
-        )
-      ]) as string[];
-      
-      if (accounts && accounts.length > 0) {
-        setState({
-          address: accounts[0],
-          isConnected: true,
-          isConnecting: false,
-          error: null,
-        });
-      } else {
-        setState({
-          address: null,
-          isConnected: false,
-          isConnecting: false,
-          error: 'No accounts found in wallet.',
-        });
-      }
-    } catch (error: any) {
-      console.error('Wallet connection error:', error);
-      
-      // Handle specific error cases
-      if (error.code === 4001) {
-        setState({
-          address: null,
-          isConnected: false,
-          isConnecting: false,
-          error: 'Connection request was rejected. Please try again.',
-        });
-      } else if (error.message === 'Connection timeout') {
-        // Retry once on timeout
-        if (retryCount < 1) {
-          console.log('Retrying wallet connection...');
-          setTimeout(() => connect(retryCount + 1), 1000);
+    let lastError: any = null;
+
+    // Try each discovered provider in turn. If one throws or times out
+    // (e.g. a broken injected provider like Phantom's evmAsk bridge),
+    // move on to the next candidate instead of retrying the same one.
+    for (const provider of candidates) {
+      try {
+        const accounts = await Promise.race([
+          provider.request({ method: 'eth_requestAccounts' }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Connection timeout')), 8000)
+          )
+        ]) as string[];
+
+        if (accounts && accounts.length > 0) {
+          activeProviderRef.current = provider;
+          setState({
+            address: accounts[0],
+            isConnected: true,
+            isConnecting: false,
+            error: null,
+          });
           return;
         }
-        
-        setState({
-          address: null,
-          isConnected: false,
-          isConnecting: false,
-          error: 'Connection timed out after retry. Browser extension interference detected. Please try: 1) Use incognito mode, 2) Disable other extensions, or 3) Try a different browser.',
-        });
-      } else if (error.message?.includes('chrome-extension')) {
-        setState({
-          address: null,
-          isConnected: false,
-          isConnecting: false,
-          error: 'Browser extension interference detected. The extension "bfnaelmomeimhlpmgjnjophhpkkoljpa" is conflicting with wallet connection. Try incognito mode or disable this extension.',
-        });
-      } else {
-        setState({
-          address: null,
-          isConnected: false,
-          isConnecting: false,
-          error: error?.message || 'Failed to connect wallet. Try disabling conflicting browser extensions.',
-        });
+      } catch (error: any) {
+        console.error('Wallet connection error:', error);
+        lastError = error;
+
+        // The user explicitly rejected the request in their wallet - stop
+        // immediately rather than trying other providers.
+        if (error.code === 4001) {
+          setState({
+            address: null,
+            isConnected: false,
+            isConnecting: false,
+            error: 'Connection request was rejected. Please try again.',
+          });
+          return;
+        }
+
+        // Otherwise this provider is unavailable/broken - fall through to
+        // the next candidate.
       }
+    }
+
+    // All candidates failed.
+    if (lastError?.message === 'Connection timeout') {
+      setState({
+        address: null,
+        isConnected: false,
+        isConnecting: false,
+        error: 'Connection timed out. If you have multiple wallet extensions installed, try disabling all but the one you want to use, then reload the page.',
+      });
+    } else {
+      setState({
+        address: null,
+        isConnected: false,
+        isConnecting: false,
+        error: lastError?.message || 'Failed to connect wallet. Try disabling conflicting browser extensions.',
+      });
     }
   };
 
   const disconnect = () => {
+    activeProviderRef.current = null;
     setState({
       address: null,
       isConnected: false,
