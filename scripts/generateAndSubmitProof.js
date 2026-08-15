@@ -19,17 +19,48 @@
 require("dotenv").config();
 const { JsonRpcProvider, Contract, Wallet, keccak256, toUtf8Bytes, AbiCoder } = require("ethers");
 const { chainInfo, blockProver, proofProvider } = require("@gluwa/usc-sdk");
+const { Pool } = require("pg");
 
 // ABI without parameter names (Solidity selectors don't include parameter names)
 const CONTRACT_ABI = [
-  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32) external",
+  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32,uint8) external",
   "function score(address) external view returns (uint256)",
   "function provenTxHashes(bytes32) external view returns (bool)",
+  "function getStats(address) external view returns (uint64,uint64,uint64,uint64,uint64)",
 ];
 
 // Aave V3 Pool contract on Ethereum Sepolia — confirm this against
 // https://github.com/bgd-labs/aave-address-book if Aave redeploys.
 const AAVE_V3_SEPOLIA_POOL = "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951";
+
+const EVENT_TYPE_INDEX = { Supply: 0, Borrow: 1, Repay: 2, Withdraw: 3, LiquidationCall: 4 };
+
+async function lookupEventType(sourceTxHash) {
+  const { DATABASE_URL } = process.env;
+  if (!DATABASE_URL) {
+    throw new Error("Missing DATABASE_URL — needed to look up the event type for SOURCE_TX_HASH.");
+  }
+  const pool = new Pool({ connectionString: DATABASE_URL });
+  try {
+    const { rows } = await pool.query(
+      'SELECT "eventName" FROM "IndexedEvent" WHERE "txHash" = $1 LIMIT 1',
+      [sourceTxHash]
+    );
+    if (rows.length === 0) {
+      throw new Error(
+        `SOURCE_TX_HASH ${sourceTxHash} not found in the indexer's database. ` +
+        `Run "npm run index" in indexer/ first, or pick a tx hash the indexer already discovered.` 
+      );
+    }
+    const eventName = rows[0].eventName;
+    if (!(eventName in EVENT_TYPE_INDEX)) {
+      throw new Error(`Unrecognized eventName "${eventName}" from indexer DB.`);
+    }
+    return EVENT_TYPE_INDEX[eventName];
+  } finally {
+    await pool.end();
+  }
+}
 
 async function main() {
   const {
@@ -84,6 +115,9 @@ async function main() {
     );
   }
   console.log("✅ Confirmed: transaction target is the Aave V3 Sepolia Pool contract.");
+
+  const eventType = await lookupEventType(SOURCE_TX_HASH);
+  console.log("Event type (from indexer DB):", Object.keys(EVENT_TYPE_INDEX)[eventType], `(${eventType})`);
 
   // --- Step 3: wait for attestation, then generate the real proof ---
   const proofBuilder = new proofProvider.service.ProofBuilder(
@@ -154,7 +188,8 @@ async function main() {
     siblingsArray,
     continuityProof.lowerEndpointDigest,
     continuityProof.roots,
-    txHashKey
+    txHashKey,
+    eventType
   );
   console.log("Tx submitted:", submitTx.hash);
   await submitTx.wait();
@@ -162,7 +197,16 @@ async function main() {
 
   // --- Step 5: read back the result ---
   const scoreAfter = await contract.score(TARGET_WALLET);
+  const [supplyCount, borrowCount, repayCount, withdrawCount, liquidationCount] =
+    await contract.getStats(TARGET_WALLET);
+  
   console.log(`Score after: ${scoreAfter}`);
+  console.log("Breakdown:");
+  console.log(`  Supply:      ${supplyCount} × 5   = ${supplyCount * 5n}`);
+  console.log(`  Borrow:      ${borrowCount} × 2   = ${borrowCount * 2n}`);
+  console.log(`  Repay:       ${repayCount} × 15  = ${repayCount * 15n}`);
+  console.log(`  Withdraw:    ${withdrawCount} × 0   = 0`);
+  console.log(`  Liquidation: ${liquidationCount} × -20 = ${liquidationCount * -20n}`);
 
   if (scoreAfter > scoreBefore) {
     console.log("\n✅ SUCCESS — score increased. The Sepolia transaction was cryptographically verified via Attestcoin and reflected on Creditcoin.");
