@@ -1,0 +1,41 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model IndexedEvent {
+  id          Int      @id @default(autoincrement())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  eventName   String
+  wallet      String
+  asset       String?
+  amount      String
+  chain       String   @default("sepolia")
+  timestamp   Int?
+  proven      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([txHash, logIndex])
+  @@index([wallet])
+  @@index([proven])
+}
+
+model IndexerCheckpoint {
+  id               Int      @id @default(autoincrement())
+  chain            String
+  contractAddress  String
+  lastIndexedBlock Int
+  updatedAt        DateTime @updatedAt
+
+  @@unique([chain, contractAddress])
+}

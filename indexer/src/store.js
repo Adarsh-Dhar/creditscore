@@ -1,42 +1,80 @@
-const fs = require("fs");
-const path = require("path");
+require('dotenv').config();
+const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
 
-const DATA_DIR = path.join(__dirname, "..", "data");
-const CHECKPOINT_PATH = path.join(DATA_DIR, "checkpoint.json");
-const EVENTS_PATH = path.join(DATA_DIR, "events.json");
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
 
-function loadJson(filePath, fallback) {
-  if (!fs.existsSync(filePath)) return fallback;
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+const prisma = new PrismaClient({ adapter });
+
+async function loadCheckpoint(chain, contractAddress) {
+  const checkpoint = await prisma.indexerCheckpoint.findUnique({
+    where: {
+      chain_contractAddress: {
+        chain,
+        contractAddress,
+      },
+    },
+  });
+  return checkpoint || { lastIndexedBlock: null };
 }
 
-function saveJson(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+async function saveCheckpoint(chain, contractAddress, lastIndexedBlock) {
+  await prisma.indexerCheckpoint.upsert({
+    where: {
+      chain_contractAddress: {
+        chain,
+        contractAddress,
+      },
+    },
+    update: {
+      lastIndexedBlock,
+    },
+    create: {
+      chain,
+      contractAddress,
+      lastIndexedBlock,
+    },
+  });
 }
 
-function loadCheckpoint() {
-  return loadJson(CHECKPOINT_PATH, { lastIndexedBlock: null });
+async function loadEvents() {
+  const events = await prisma.indexedEvent.findMany({
+    orderBy: [
+      { blockNumber: 'asc' },
+      { logIndex: 'asc' },
+    ],
+  });
+  return events;
 }
 
-function saveCheckpoint(checkpoint) {
-  saveJson(CHECKPOINT_PATH, checkpoint);
+async function saveEvent(eventData) {
+  return await prisma.indexedEvent.create({
+    data: eventData,
+  });
 }
 
-function loadEvents() {
-  return loadJson(EVENTS_PATH, []);
+async function getSeenKeys() {
+  const events = await prisma.indexedEvent.findMany({
+    select: {
+      txHash: true,
+      logIndex: true,
+    },
+  });
+  return new Set(events.map((e) => `${e.txHash}:${e.logIndex}`));
 }
 
-function saveEvents(events) {
-  saveJson(EVENTS_PATH, events);
+async function disconnect() {
+  await prisma.$disconnect();
+  await pool.end();
 }
 
 module.exports = {
-  DATA_DIR,
-  CHECKPOINT_PATH,
-  EVENTS_PATH,
   loadCheckpoint,
   saveCheckpoint,
   loadEvents,
-  saveEvents,
+  saveEvent,
+  getSeenKeys,
+  disconnect,
 };

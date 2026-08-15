@@ -16,7 +16,7 @@ require("dotenv").config();
 const { JsonRpcProvider, Contract, Interface } = require("ethers");
 const { AAVE_V3_SEPOLIA_POOL, POOL_EVENT_ABI, EVENT_NAMES, CHUNK_SIZE } = require("./config");
 const { extractWallet, extractAssetAndAmount } = require("./aaveDecoder");
-const { loadCheckpoint, saveCheckpoint, loadEvents, saveEvents } = require("./store");
+const { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, disconnect } = require("./store");
 
 // Retry configuration for RPC rate limiting
 const MAX_RETRIES = 5;
@@ -74,9 +74,11 @@ async function main() {
   const iface = new Interface(POOL_EVENT_ABI);
   const contract = new Contract(AAVE_V3_SEPOLIA_POOL, POOL_EVENT_ABI, provider);
 
-  const checkpoint = loadCheckpoint();
-  const eventStore = loadEvents();
-  const seenKeys = new Set(eventStore.map((e) => `${e.txHash}:${e.logIndex}`));
+  const chain = "sepolia";
+  const contractAddress = AAVE_V3_SEPOLIA_POOL;
+  
+  const checkpoint = await loadCheckpoint(chain, contractAddress);
+  const seenKeys = await getSeenKeys();
 
   const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
   const fromBlock = resolveFromBlock({
@@ -88,6 +90,7 @@ async function main() {
 
   if (fromBlock > latestBlock) {
     console.log(`Nothing to do — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`);
+    await disconnect();
     return;
   }
 
@@ -97,76 +100,82 @@ async function main() {
   let newCount = 0;
   const blockTimestampCache = new Map(); // Cache block timestamps to avoid redundant calls
 
-  for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
-    const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
-    process.stdout.write(`  scanning ${start}-${end}... `);
+  try {
+    for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
+      const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
+      process.stdout.write(`  scanning ${start}-${end}... `);
 
-    // One queryFilter per event type keeps ABI decoding unambiguous and
-    // makes a failure on one event type easy to isolate and retry.
-    for (const eventName of EVENT_NAMES) {
-      let logs;
-      try {
-        logs = await retryWithBackoff(
-          () => contract.queryFilter(contract.filters[eventName](), start, end),
-          `${eventName} (${start}-${end})`
-        );
-      } catch (err) {
-        console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
-        console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
-        throw err;
-      }
-
-      // Small delay between event types to avoid rate limiting
-      if (EVENT_NAMES.indexOf(eventName) < EVENT_NAMES.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
-      }
-
-      for (const log of logs) {
-        const key = `${log.transactionHash}:${log.index}`;
-        if (seenKeys.has(key)) continue;
-
-        const parsed = iface.parseLog(log);
-        const wallet = extractWallet(eventName, parsed.args);
-        const { asset, amount } = extractAssetAndAmount(eventName, parsed.args);
-
-        // Get block timestamp (cached per block number)
-        let timestamp;
-        if (blockTimestampCache.has(log.blockNumber)) {
-          timestamp = blockTimestampCache.get(log.blockNumber);
-        } else {
-          const block = await retryWithBackoff(
-            () => provider.getBlock(log.blockNumber),
-            `getBlock(${log.blockNumber})`
+      // One queryFilter per event type keeps ABI decoding unambiguous and
+      // makes a failure on one event type easy to isolate and retry.
+      for (const eventName of EVENT_NAMES) {
+        let logs;
+        try {
+          logs = await retryWithBackoff(
+            () => contract.queryFilter(contract.filters[eventName](), start, end),
+            `${eventName} (${start}-${end})`
           );
-          timestamp = block.timestamp;
-          blockTimestampCache.set(log.blockNumber, timestamp);
+        } catch (err) {
+          console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
+          console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
+          throw err;
         }
 
-        eventStore.push({
-          txHash: log.transactionHash,
-          logIndex: log.index,
-          blockNumber: log.blockNumber,
-          eventName,
-          wallet,
-          asset,
-          amount,
-          chain: "sepolia", // Hardcoded for single-chain MVP
-          timestamp,
-          proven: false, // flip to true out-of-band once generateAndSubmitProof.js succeeds for this txHash
-        });
-        seenKeys.add(key);
-        newCount++;
+        // Small delay between event types to avoid rate limiting
+        if (EVENT_NAMES.indexOf(eventName) < EVENT_NAMES.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
+        }
+
+        for (const log of logs) {
+          const key = `${log.transactionHash}:${log.index}`;
+          if (seenKeys.has(key)) continue;
+
+          const parsed = iface.parseLog(log);
+          const wallet = extractWallet(eventName, parsed.args);
+          const { asset, amount } = extractAssetAndAmount(eventName, parsed.args);
+
+          // Get block timestamp (cached per block number)
+          let timestamp;
+          if (blockTimestampCache.has(log.blockNumber)) {
+            timestamp = blockTimestampCache.get(log.blockNumber);
+          } else {
+            const block = await retryWithBackoff(
+              () => provider.getBlock(log.blockNumber),
+              `getBlock(${log.blockNumber})`
+            );
+            timestamp = block.timestamp;
+            blockTimestampCache.set(log.blockNumber, timestamp);
+          }
+
+          await saveEvent({
+            txHash: log.transactionHash,
+            logIndex: log.index,
+            blockNumber: log.blockNumber,
+            eventName,
+            wallet,
+            asset,
+            amount,
+            chain: "sepolia", // Hardcoded for single-chain MVP
+            timestamp,
+            proven: false, // flip to true out-of-band once generateAndSubmitProof.js succeeds for this txHash
+          });
+          seenKeys.add(key);
+          newCount++;
+        }
       }
+      process.stdout.write("done\n");
     }
-    process.stdout.write("done\n");
+
+    await saveCheckpoint(chain, contractAddress, latestBlock);
+
+    console.log(`\nIndexed ${newCount} new event(s). Checkpoint advanced to block ${latestBlock}.`);
+    
+    // Load events for summary
+    const { loadEvents } = require('./store');
+    const eventStore = await loadEvents();
+    printSummary(eventStore);
+  } finally {
+    await disconnect();
   }
-
-  checkpoint.lastIndexedBlock = latestBlock;
-  saveCheckpoint(checkpoint);
-  saveEvents(eventStore);
-
-  console.log(`\nIndexed ${newCount} new event(s). Checkpoint advanced to block ${latestBlock}.`);
-  printSummary(eventStore);
 }
 
 function printSummary(eventStore) {

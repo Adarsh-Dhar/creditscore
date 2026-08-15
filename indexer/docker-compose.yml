@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: creditscore-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: creditscore
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: creditscore
+    ports:
+      - "5433:5432"
+    volumes:
+      - creditscore_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creditscore -d creditscore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  creditscore_pg_data:
