@@ -18,6 +18,32 @@ const { AAVE_V3_SEPOLIA_POOL, POOL_EVENT_ABI, EVENT_NAMES, CHUNK_SIZE } = requir
 const { extractWallet, extractAssetAndAmount } = require("./aaveDecoder");
 const { loadCheckpoint, saveCheckpoint, loadEvents, saveEvents } = require("./store");
 
+// Retry configuration for RPC rate limiting
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY = 1000; // 1 second
+const QUERY_DELAY = 500; // 500ms delay between event type queries
+
+async function retryWithBackoff(fn, context = "") {
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const isRateLimit = err.code === -32005 || err.message?.includes("Too Many Requests") || err.message?.includes("429");
+      
+      if (!isRateLimit || attempt === MAX_RETRIES) {
+        throw err;
+      }
+      
+      const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+      console.log(`  ! Rate limited on ${context}, retry ${attempt}/${MAX_RETRIES} in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 function parseArgs() {
   const args = process.argv.slice(2);
   const out = {};
@@ -52,7 +78,7 @@ async function main() {
   const eventStore = loadEvents();
   const seenKeys = new Set(eventStore.map((e) => `${e.txHash}:${e.logIndex}`));
 
-  const latestBlock = await provider.getBlockNumber();
+  const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
   const fromBlock = resolveFromBlock({
     cliFromBlock: cli.fromBlock,
     checkpointBlock: checkpoint.lastIndexedBlock,
@@ -69,6 +95,7 @@ async function main() {
   console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
 
   let newCount = 0;
+  const blockTimestampCache = new Map(); // Cache block timestamps to avoid redundant calls
 
   for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
     const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
@@ -79,11 +106,19 @@ async function main() {
     for (const eventName of EVENT_NAMES) {
       let logs;
       try {
-        logs = await contract.queryFilter(contract.filters[eventName](), start, end);
+        logs = await retryWithBackoff(
+          () => contract.queryFilter(contract.filters[eventName](), start, end),
+          `${eventName} (${start}-${end})`
+        );
       } catch (err) {
-        console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed: ${err.message}`);
+        console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
         console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
         throw err;
+      }
+
+      // Small delay between event types to avoid rate limiting
+      if (EVENT_NAMES.indexOf(eventName) < EVENT_NAMES.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
       }
 
       for (const log of logs) {
@@ -94,6 +129,19 @@ async function main() {
         const wallet = extractWallet(eventName, parsed.args);
         const { asset, amount } = extractAssetAndAmount(eventName, parsed.args);
 
+        // Get block timestamp (cached per block number)
+        let timestamp;
+        if (blockTimestampCache.has(log.blockNumber)) {
+          timestamp = blockTimestampCache.get(log.blockNumber);
+        } else {
+          const block = await retryWithBackoff(
+            () => provider.getBlock(log.blockNumber),
+            `getBlock(${log.blockNumber})`
+          );
+          timestamp = block.timestamp;
+          blockTimestampCache.set(log.blockNumber, timestamp);
+        }
+
         eventStore.push({
           txHash: log.transactionHash,
           logIndex: log.index,
@@ -102,6 +150,8 @@ async function main() {
           wallet,
           asset,
           amount,
+          chain: "sepolia", // Hardcoded for single-chain MVP
+          timestamp,
           proven: false, // flip to true out-of-band once generateAndSubmitProof.js succeeds for this txHash
         });
         seenKeys.add(key);

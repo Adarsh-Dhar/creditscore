@@ -18,6 +18,12 @@ cp .env.example .env
 # fill in SEPOLIA_RPC
 ```
 
+**RPC Provider Notes:**
+- Infura free tier is heavily rate-limited. You may see "Too Many Requests" errors.
+- Consider using Alchemy, QuickNode, or other providers for better reliability.
+- The indexer includes automatic retry logic with exponential backoff for rate limits.
+- If rate limiting persists, reduce `INDEXER_CHUNK_SIZE` in `.env` (default: 5000).
+
 ## Run
 
 ```bash
@@ -48,6 +54,8 @@ npm run index -- --from-block 1234567
   "wallet": "0x...",
   "asset": "0x...",
   "amount": "1000000",
+  "chain": "sepolia",
+  "timestamp": 1234567890,
   "proven": false
 }
 ```
