@@ -10,7 +10,8 @@
     "prove-queue": "node scripts/proveQueue.js",
     "check-score": "node scripts/checkScore.js",
     "test-tx": "node scripts/testTransaction.js",
-    "index": "npm --prefix indexer run index"
+    "index": "npm --prefix indexer run index",
+    "api": "npm --prefix api run dev"
   },
   "dependencies": {
     "@gluwa/usc-sdk": "^0.18.0",

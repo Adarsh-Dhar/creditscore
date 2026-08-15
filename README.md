@@ -19,7 +19,15 @@ creditscore-mvp/
 ├── scripts/
 │   ├── deploy.js                 # deploys the contract to CC3 Testnet
 │   ├── generateAndSubmitProof.js # the main demo script
-│   └── checkScore.js             # reads back a wallet's score anytime
+│   ├── checkScore.js             # reads back a wallet's score anytime
+│   ├── proveQueue.js             # batch-proves queued events from the indexer
+│   └── lib/
+│       └── proveBatch.js         # batch proof generation helper
+├── indexer/
+│   ├── src/
+│   │   ├── config.js             # indexer configuration
+│   │   └── index.js              # main indexer logic
+│   └── package.json
 ├── hardhat.config.js
 ├── package.json
 ├── .env.example                  # copy to .env and fill in
@@ -191,4 +199,20 @@ not that it was specifically a repay of a specific amount), multiple
 protocols, an indexer to find transactions automatically, a scoring formula,
 a database, or a frontend. Those are the next build phases once this core
 loop is proven to someone.
-# creditscore
+
+---
+
+## Selector Coverage
+
+The contract currently supports the following Aave V3 Pool function selectors:
+
+- `supply(address,uint256,address,uint16)` → EventType.Supply
+- `supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)` → EventType.Supply
+- `borrow(address,uint256,uint256,uint16,address)` → EventType.Borrow
+- `repay(address,uint256,uint256,address)` → EventType.Repay
+- `repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)` → EventType.Repay
+- `repayWithATokens(address,uint256,uint256,uint16,address)` → EventType.Repay
+- `withdraw(address,uint256,address)` → EventType.Withdraw
+- `liquidationCall(address,address,address,uint256,bool)` → EventType.LiquidationCall
+
+**Known gap:** WETHGateway operations (e.g., `depositETH`, `withdrawETH`) are not currently supported. These transactions target the WETHGateway contract rather than the Pool directly, so they bypass the selector-based decoding. Future versions could extend support by adding WETHGateway selectors and/or additional target address checks.

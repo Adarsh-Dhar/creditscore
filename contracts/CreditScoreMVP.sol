@@ -72,11 +72,14 @@ contract CreditScoreMVP {
 
     // Aave V3 Pool function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit; anything else reverts.
-    bytes4 constant SEL_SUPPLY = 0x617ba037;           // supply(address,uint256,address,uint16)
-    bytes4 constant SEL_BORROW = 0xa415bcad;            // borrow(address,uint256,uint256,uint16,address)
-    bytes4 constant SEL_REPAY = 0x573ade81;             // repay(address,uint256,uint256,address)
-    bytes4 constant SEL_WITHDRAW = 0x69328dec;          // withdraw(address,uint256,address)
-    bytes4 constant SEL_LIQUIDATION_CALL = 0x00a718a9;  // liquidationCall(address,address,address,uint256,bool)
+    bytes4 constant SEL_SUPPLY = 0x617ba037;                // supply(address,uint256,address,uint16)
+    bytes4 constant SEL_BORROW = 0xa415bcad;                 // borrow(address,uint256,uint256,uint16,address)
+    bytes4 constant SEL_REPAY = 0x573ade81;                 // repay(address,uint256,uint256,address)
+    bytes4 constant SEL_WITHDRAW = 0x69328dec;              // withdraw(address,uint256,address)
+    bytes4 constant SEL_LIQUIDATION_CALL = 0x00a718a9;      // liquidationCall(address,address,address,uint256,bool)
+    bytes4 constant SEL_SUPPLY_WITH_PERMIT = 0xf5660694;    // supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_REPAY_WITH_PERMIT = 0x5cfc1b2c;     // repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
 
     event LoanEventProven(
         address indexed wallet,
@@ -112,6 +115,9 @@ contract CreditScoreMVP {
         if (selector == SEL_REPAY) return EventType.Repay;
         if (selector == SEL_WITHDRAW) return EventType.Withdraw;
         if (selector == SEL_LIQUIDATION_CALL) return EventType.LiquidationCall;
+        if (selector == SEL_SUPPLY_WITH_PERMIT) return EventType.Supply;
+        if (selector == SEL_REPAY_WITH_PERMIT) return EventType.Repay;
+        if (selector == SEL_REPAY_WITH_ATOKENS) return EventType.Repay;
         revert("unrecognized Aave Pool selector");
     }
 
