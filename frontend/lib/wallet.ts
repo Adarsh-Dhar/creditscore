@@ -61,8 +61,9 @@ function suppressExtensionErrors() {
 }
 
 // Collects every wallet extension announced on the page via EIP-6963,
-// instead of relying on window.ethereum, which any single extension
-// (e.g. Phantom) can silently claim/overwrite and which may be broken.
+// but only returns MetaMask to avoid interference from other wallets.
+const METAMASK_RDNS = 'io.metamask';
+
 function useDiscoveredProviders() {
   const providersRef = useRef<Map<string, EIP1193Provider>>(new Map());
 
@@ -79,15 +80,32 @@ function useDiscoveredProviders() {
     };
   }, []);
 
-  // Ordered candidate list: all EIP-6963 announced providers first,
-  // then window.ethereum as a last-resort fallback for older wallets
-  // that don't support EIP-6963 yet.
+  // Only return MetaMask provider to avoid Phantom extension interference
   const getCandidates = (): EIP1193Provider[] => {
-    const list = Array.from(providersRef.current.values());
-    if (window.ethereum && !list.includes(window.ethereum)) {
-      list.push(window.ethereum);
+    // First try EIP-6963 announced MetaMask
+    const metamaskEIP6963 = providersRef.current.get(METAMASK_RDNS);
+    if (metamaskEIP6963) {
+      return [metamaskEIP6963];
     }
-    return list;
+
+    // Fallback to older MetaMask versions that don't support EIP-6963
+    if (window.ethereum) {
+      // Check if window.ethereum is MetaMask directly
+      if (window.ethereum.isMetaMask) {
+        return [window.ethereum];
+      }
+
+      // Check window.ethereum.providers array (older MetaMask pattern)
+      if ('providers' in window.ethereum && Array.isArray(window.ethereum.providers)) {
+        const metamaskProvider = window.ethereum.providers.find((p: any) => p.isMetaMask);
+        if (metamaskProvider) {
+          return [metamaskProvider];
+        }
+      }
+    }
+
+    // MetaMask not found
+    return [];
   };
 
   return { getCandidates };
@@ -172,7 +190,7 @@ export function useWallet() {
         address: null,
         isConnected: false,
         isConnecting: false,
-        error: 'No wallet extension found. Please install MetaMask or another Web3 wallet.',
+        error: 'MetaMask not found. Please install the MetaMask extension.',
       });
       return;
     }

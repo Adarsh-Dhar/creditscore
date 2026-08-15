@@ -34,7 +34,15 @@ app.use('/api/weights', weightsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  // Check database connection status
+  const dbConfigured = process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('user:password');
+  
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    database: dbConfigured ? 'configured' : 'not configured',
+    message: dbConfigured ? 'Database connection configured' : 'Please configure DATABASE_URL in api/.env'
+  });
 });
 
 // Centralized error handler
@@ -57,6 +65,13 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
   console.log(`CORS origins: ${corsOrigins.join(', ')}`);
+  
+  // Validate database connection on startup
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('user:password')) {
+    console.error('⚠️  WARNING: DATABASE_URL is not properly configured');
+    console.error('Please edit api/.env with your actual PostgreSQL credentials');
+    console.error('Format: postgresql://username:password@localhost:5432/database_name');
+  }
 });
 
 module.exports = app;

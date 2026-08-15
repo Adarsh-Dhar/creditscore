@@ -14,14 +14,41 @@
 
 **Manual setup:**
 
-1. **Configure database connection:**
+1. **Set up PostgreSQL database:**
+   ```bash
+   # Make sure PostgreSQL is running
+   brew services start postgresql  # macOS
+   # or: sudo systemctl start postgresql  # Linux
+   
+   # Create database
+   createdb creditscore_db
+   
+   # Or use psql to create:
+   psql -d postgres
+   CREATE DATABASE creditscore_db;
+   \q
+   ```
+
+2. **Configure database connection:**
    ```bash
    cd api
    cp .env.example .env
-   # Edit .env with your actual DATABASE_URL and other credentials
+   # Edit .env with your actual DATABASE_URL
    ```
+   
+   Example DATABASE_URL format:
+   ```
+   DATABASE_URL=postgresql://postgres:your_password@localhost:5432/creditscore_db
+   ```
+   
+   Replace:
+   - `postgres` with your PostgreSQL username
+   - `your_password` with your PostgreSQL password
+   - `localhost` with your database host if different
+   - `5432` with your database port if different
+   - `creditscore_db` with your database name if different
 
-2. **Install dependencies:**
+3. **Install dependencies:**
    ```bash
    cd api
    pnpm install
@@ -29,12 +56,12 @@
    npx prisma generate
    ```
 
-3. **Start the API server:**
+4. **Start the API server:**
    ```bash
    cd api
    pnpm run dev
    ```
-   The API will run on port 3001
+   The API will run on port 3002
 
 ## Frontend Setup
 
@@ -42,7 +69,7 @@
    ```bash
    cd frontend
    cp .env.local.example .env.local
-   # The API URL is already set to http://localhost:3001
+   # The API URL is already set to http://localhost:3002
    ```
 
 2. **Start the frontend:**
@@ -54,24 +81,30 @@
 
 ## Troubleshooting
 
+### Database authentication errors
+- **Error**: "Authentication failed for user user" or "ConnectorError"
+- **Cause**: Using placeholder credentials (`user:password`) in DATABASE_URL
+- **Fix**: Update `api/.env` with your actual PostgreSQL credentials
+- **Format**: `postgresql://username:password@localhost:5432/database_name`
+- **Steps**:
+  1. Make sure PostgreSQL is running
+  2. Create database: `createdb creditscore_db`
+  3. Update DATABASE_URL in api/.env with real credentials
+  4. Restart API server
+
 ### API returns 404 errors
-- Make sure the backend API server is running on port 3001
+- Make sure the backend API server is running on port 3002
 - Check that DATABASE_URL is correctly configured in api/.env
 - Ensure Prisma client has been generated: `cd api && npx prisma generate`
 
 ### Wallet connection errors
-- Ensure you have a wallet extension installed (MetaMask, etc.)
-- Some browser extensions may cause conflicts - try disabling other extensions
+- Ensure you have MetaMask extension installed (the app is MetaMask-only)
+- The app automatically ignores other wallet extensions to avoid conflicts
 - Check browser console for specific error messages
 
 ### CORS errors
 - Update CORS_ORIGINS in api/.env to include your frontend URL
-- Example: `CORS_ORIGINS=http://localhost:3000,http://localhost:3001`
-
-### Database connection errors
-- Verify PostgreSQL is running
-- Check DATABASE_URL format: `postgresql://user:password@localhost:5432/database_name`
-- Ensure the database exists and credentials are correct
+- Current config: `CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3002`
 
 ### Wallet connection errors with browser extensions
 - **Symptom**: "Unexpected error" or "chrome-extension" errors when connecting wallet
