@@ -25,4 +25,9 @@ module.exports = {
       accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
     },
   },
+  // Configure automatic library deployment
+  ethers: {
+    // This will automatically deploy and link libraries
+    buildPoseidon: false,
+  },
 };

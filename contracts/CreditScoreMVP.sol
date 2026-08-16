@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {INativeQueryVerifier, NativeQueryVerifierLib} from "@gluwa/usc-contracts/contracts/write-ability/INativeQueryVerifier.sol";
+import {INativeQueryVerifier, NativeQueryVerifierLib} from "./INativeQueryVerifier.sol";
 import {EvmV1Decoder} from "@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol";
 
 /// @title INativeQueryVerifierBatch
@@ -89,8 +89,45 @@ contract CreditScoreMVP {
         EventType eventType
     );
 
+    event CorruptedProofReset(bytes32 indexed txHashKey, address indexed wallet);
+
+    address public owner;
+
     constructor() {
         VERIFIER = NativeQueryVerifierLib.getVerifier(); // resolves to the 0x0FD2 precompile
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+
+    /// @notice Reset a corrupted proof state where txHashKey was marked as proven
+    /// but the wallet was never credited (due to mid-execution failure)
+    /// @dev This is an emergency recovery function for the deduplication bug
+    /// @param txHashKey The corrupted transaction hash key to reset
+    /// @param wallet The wallet address that should have been credited
+    function resetCorruptedProof(bytes32 txHashKey, address wallet) external onlyOwner {
+        require(provenTxHashes[txHashKey], "Transaction not marked as proven");
+        
+        // Check if wallet was actually credited (stats should be 0 if corrupted)
+        WalletStats memory s = stats[wallet];
+        bool walletNotCredited = s.supplyCount == 0 && s.borrowCount == 0 && 
+                                  s.repayCount == 0 && s.withdrawCount == 0 && 
+                                  s.liquidationCount == 0;
+        
+        require(walletNotCredited, "Wallet was already credited - not a corrupted state");
+        
+        // Reset the corrupted state
+        provenTxHashes[txHashKey] = false;
+        emit CorruptedProofReset(txHashKey, wallet);
+    }
+
+    /// @notice Transfer ownership of the contract
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "New owner cannot be zero address");
+        owner = newOwner;
     }
 
     /// @notice Derives the EventType from the verified transaction's own
@@ -150,9 +187,11 @@ contract CreditScoreMVP {
         EventType actualEventType = _decodeEventType(encodedTx);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
-        provenTxHashes[txHashKey] = true;
+        // FIXED: Credit wallet and emit event BEFORE marking as proven
+        // This prevents corrupted state if transaction fails mid-execution
         _creditWallet(wallet, actualEventType);
         emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, actualEventType);
+        provenTxHashes[txHashKey] = true;
     }
 
     /// @notice Batch version of proveLoanEvent - proves multiple events in a single transaction
@@ -228,9 +267,11 @@ contract CreditScoreMVP {
         EventType actualEventType = _decodeEventType(encodedTx);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
-        provenTxHashes[txHashKey] = true;
+        // FIXED: Credit wallet and emit event BEFORE marking as proven
+        // This prevents corrupted state if transaction fails mid-execution
         _creditWallet(wallet, actualEventType);
         emit LoanEventProven(wallet, chainKey, height, txHashKey, actualEventType);
+        provenTxHashes[txHashKey] = true;
     }
 
     /// @notice Internal helper to credit a wallet based on event type

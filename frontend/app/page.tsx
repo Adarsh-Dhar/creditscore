@@ -127,6 +127,30 @@ export default function Page() {
   const [eventFilter, setEventFilter] = useState<string | null>(null)
   const [totalEvents, setTotalEvents] = useState(0)
 
+  // Network dropdown state
+  const [networkDropdownOpen, setNetworkDropdownOpen] = useState(false)
+  const [selectedChain, setSelectedChain] = useState('Sepolia')
+
+  // Block explorer URLs for different chains
+  const getBlockExplorerUrl = (chain: string, address: string) => {
+    const explorers: Record<string, string> = {
+      'ethereum': `https://etherscan.io/address/${address}`,
+      'sepolia': `https://sepolia.etherscan.io/address/${address}`,
+      'cc3 testnet': `https://explorer.testnet.cc3.cloud/address/${address}`,
+    }
+    return explorers[chain.toLowerCase()] || `https://etherscan.io/address/${address}`
+  }
+
+  // Transaction explorer URLs for different chains
+  const getTxExplorerUrl = (chain: string, txHash: string) => {
+    const explorers: Record<string, string> = {
+      'ethereum': `https://etherscan.io/tx/${txHash}`,
+      'sepolia': `https://sepolia.etherscan.io/tx/${txHash}`,
+      'cc3 testnet': `https://explorer.testnet.cc3.cloud/tx/${txHash}`,
+    }
+    return explorers[chain.toLowerCase()] || `https://etherscan.io/tx/${txHash}`
+  }
+
   // Load weights and chains status once on mount
   useEffect(() => {
     const loadGlobalData = async () => {
@@ -345,7 +369,30 @@ export default function Page() {
         </div>
         <div className="network-pill">
           <span className="network-dot" />
-          {chainsData.length > 0 ? chainsData[0].chain : 'Loading...'} <ChevronDown size={14} />
+          <button 
+            className="network-dropdown-toggle"
+            onClick={() => setNetworkDropdownOpen(!networkDropdownOpen)}
+          >
+            {selectedChain} <ChevronDown size={14} />
+          </button>
+          {networkDropdownOpen && (
+            <div className="network-dropdown">
+              {chainsData.length > 0 ? (
+                chainsData.map(chain => (
+                  <button 
+                    key={chain.chain}
+                    onClick={() => { setSelectedChain(chain.chain); setNetworkDropdownOpen(false) }}
+                  >
+                    {chain.chain}
+                  </button>
+                ))
+              ) : (
+                <button onClick={() => { setSelectedChain('Sepolia'); setNetworkDropdownOpen(false) }}>
+                  Sepolia
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">
           <p className="nav-label">Workspace</p>
@@ -361,34 +408,7 @@ export default function Page() {
           <button className="nav-item" onClick={() => setActiveNav('Settings')}><Settings2 size={18} /> Settings</button>
           <button className="nav-item" onClick={() => setActiveNav('Help')}><CircleHelp size={18} /> Help center</button>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="protocol-card">
-            <div className="protocol-icon"><Zap size={16} /></div>
-            <div>
-              <strong>Protocol status</strong>
-              <span>
-                <i /> {chainsData.length > 0 && chainsData[0].lagBehind !== null 
-                  ? `${chainsData[0].lagBehind} blocks behind` 
-                  : 'Checking...'}
-              </span>
-            </div>
-          </div>
-          {isConnected ? (
-            <div className="profile-row">
-              <div className="avatar">{walletAddress?.substring(2, 4).toUpperCase()}</div>
-              <div className="profile-info">
-                <strong>{walletAddress?.substring(0, 6)}...{walletAddress?.substring(38)}</strong>
-                <span>{walletAddress?.substring(0, 10)}...</span>
-              </div>
-              <button className="icon-button" onClick={disconnect} aria-label="Disconnect"><X size={14} /></button>
-            </div>
-          ) : (
-            <button className="connect-button" onClick={connect} disabled={isConnecting}>
-              {isConnecting ? <LoadingSpinner size={16} /> : <Wallet size={16} />}
-              {isConnecting ? 'Connecting...' : 'Connect wallet'}
-            </button>
-          )}
-        </div>
+
       </aside>
 
       {mobileOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
@@ -550,7 +570,10 @@ export default function Page() {
                           <strong>{summary ? summary.unprovenCount : 0}</strong>
                         </div>
                       </div>
-                      <button className="outline-button">
+                      <button 
+                        className="outline-button"
+                        onClick={() => window.open(getBlockExplorerUrl(selectedChain, currentAddress), '_blank')}
+                      >
                         View on block explorer <ExternalLink size={14} />
                       </button>
                     </section>
@@ -637,7 +660,15 @@ export default function Page() {
                             <strong className={`activity-points ${event.proven ? 'proven' : 'unproven'}`}>
                               {event.proven ? 'Verified' : 'Pending'}
                             </strong>
-                            <ArrowDownRight className="activity-arrow" size={16} />
+                            <a 
+                              href={getTxExplorerUrl(event.chain, event.txHash)} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="activity-link"
+                              title="View on block explorer"
+                            >
+                              <ExternalLink size={16} />
+                            </a>
                           </div>
                         )
                       })
@@ -709,7 +740,15 @@ export default function Page() {
                               <strong className={`activity-points ${event.proven ? 'proven' : 'unproven'}`}>
                                 {event.proven ? 'Verified' : 'Pending'}
                               </strong>
-                              <ArrowDownRight className="activity-arrow" size={16} />
+                              <a 
+                                href={getTxExplorerUrl(event.chain, event.txHash)} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="activity-link"
+                                title="View on block explorer"
+                              >
+                                <ExternalLink size={16} />
+                              </a>
                             </div>
                           )
                         })}

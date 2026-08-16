@@ -6,10 +6,9 @@
   "scripts": {
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
-    "prove": "node scripts/generateAndSubmitProof.js",
     "prove-queue": "node scripts/proveQueue.js",
     "check-score": "node scripts/checkScore.js",
-    "test-tx": "node scripts/testTransaction.js",
+    "supply-to-aave": "node scripts/supply-to-aave.js",
     "index": "npm --prefix indexer run index",
     "api": "npm --prefix api run dev"
   },

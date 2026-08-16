@@ -131,7 +131,7 @@ export function useWallet() {
           const accounts = await Promise.race([
             provider.request({ method: 'eth_accounts' }),
             new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Connection check timeout')), 2000)
+              setTimeout(() => reject(new Error('Connection check timeout')), 5000)
             )
           ]) as string[];
 
@@ -190,7 +190,7 @@ export function useWallet() {
         address: null,
         isConnected: false,
         isConnecting: false,
-        error: 'MetaMask not found. Please install the MetaMask extension.',
+        error: 'MetaMask not found. Please install the MetaMask extension and refresh the page.',
       });
       return;
     }
@@ -207,7 +207,7 @@ export function useWallet() {
         const accounts = await Promise.race([
           provider.request({ method: 'eth_requestAccounts' }),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Connection timeout')), 8000)
+            setTimeout(() => reject(new Error('Connection timeout')), 15000)
           )
         ]) as string[];
 
@@ -237,6 +237,13 @@ export function useWallet() {
           return;
         }
 
+        // If provider is not responding or has internal errors, try next candidate
+        if (error.message?.includes('MetaMask extension not found') || 
+            error.message?.includes('Failed to connect')) {
+          console.log('Provider not available, trying next candidate...');
+          continue;
+        }
+
         // Otherwise this provider is unavailable/broken - fall through to
         // the next candidate.
       }
@@ -248,14 +255,21 @@ export function useWallet() {
         address: null,
         isConnected: false,
         isConnecting: false,
-        error: 'Connection timed out. If you have multiple wallet extensions installed, try disabling all but the one you want to use, then reload the page.',
+        error: 'Connection timed out. Please ensure MetaMask is unlocked and try again. If you have multiple wallet extensions, try disabling others.',
+      });
+    } else if (lastError?.message?.includes('MetaMask extension not found')) {
+      setState({
+        address: null,
+        isConnected: false,
+        isConnecting: false,
+        error: 'MetaMask extension not responding. Please refresh the page or reinstall MetaMask.',
       });
     } else {
       setState({
         address: null,
         isConnected: false,
         isConnecting: false,
-        error: lastError?.message || 'Failed to connect wallet. Try disabling conflicting browser extensions.',
+        error: lastError?.message || 'Failed to connect wallet. Please ensure MetaMask is installed and unlocked.',
       });
     }
   };
