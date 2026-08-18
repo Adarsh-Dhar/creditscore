@@ -34,16 +34,25 @@ const CONTRACT_ABI = [
   "function getStats(address) external view returns (uint64,uint64,uint64,uint64,uint64)",
 ];
 
-// Aave V3 Pool contract on Ethereum Sepolia — confirm this against
-// https://github.com/bgd-labs/aave-address-book if Aave redeploys.
-const AAVE_V3_SEPOLIA_POOL = "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951";
+// Pool addresses by chain for validation
+const POOL_BY_CHAIN = {
+  sepolia: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+  "cc3-testnet": process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+};
+
+// Chain ID mappings for supported chains
+const CHAIN_IDS = {
+  sepolia: 11155111,
+  "cc3-testnet": 102031, // Creditcoin CC3 Testnet chain ID (tCTC)
+};
 
 /**
  * @param {object} params
- * @param {string} params.sourceTxHash   Sepolia tx hash to prove.
+ * @param {string} params.sourceTxHash   Source chain tx hash to prove.
  * @param {string} params.targetWallet   Wallet address to credit on-chain.
  * @param {number} params.eventType      EventType enum index (see lib/eventTypes.js).
- * @param {string} params.sepoliaRpc
+ * @param {string} params.sourceRpc      Source chain RPC URL.
+ * @param {string} params.chain          Chain name (e.g., "sepolia", "cc3-testnet").
  * @param {string} params.cc3TestnetRpc
  * @param {string} params.proverApiUrl
  * @param {string} params.privateKey
@@ -55,7 +64,8 @@ async function proveTransaction({
   sourceTxHash,
   targetWallet,
   eventType,
-  sepoliaRpc,
+  sourceRpc,
+  chain,
   cc3TestnetRpc,
   proverApiUrl,
   privateKey,
@@ -66,29 +76,39 @@ async function proveTransaction({
     throw new Error(`No eventType provided for ${sourceTxHash}.`);
   }
 
-  const sourceProvider = new JsonRpcProvider(sepoliaRpc);
+  const sourceProvider = new JsonRpcProvider(sourceRpc);
   const creditcoinProvider = new JsonRpcProvider(cc3TestnetRpc);
 
-  // --- Step 1: find the chainKey for Sepolia ---
+  // --- Step 1: find the chainKey for the source chain ---
   const chainInfoProvider = new chainInfo.PrecompileChainInfoProvider(creditcoinProvider);
   const supportedChains = await chainInfoProvider.getSupportedChains();
 
-  const sepoliaEntry = supportedChains.find((c) => c.chainId === 11155111); // Ethereum Sepolia chain ID
-  if (!sepoliaEntry) {
+  const numericChainId = CHAIN_IDS[chain];
+  if (!numericChainId) {
+    throw new Error(`Unknown chain name: ${chain}`);
+  }
+
+  const chainEntry = supportedChains.find((c) => c.chainId === numericChainId);
+  if (!chainEntry) {
     throw new Error(
-      "No Sepolia entry found in getSupportedChains() — verify current chain support before continuing."
+      `No ${chain} entry found in getSupportedChains() — verify current chain support before continuing.`
     );
   }
-  const chainKey = sepoliaEntry.chainKey;
+  const chainKey = chainEntry.chainKey;
 
-  // --- Step 2: locate the transaction's block, guard it's an Aave tx ---
+  // --- Step 2: locate the transaction's block, guard it's a Pool tx ---
+  const poolAddress = POOL_BY_CHAIN[chain];
+  if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
+    throw new Error(`No pool address configured for chain ${chain}`);
+  }
+
   const tx = await sourceProvider.getTransaction(sourceTxHash);
-  if (!tx) throw new Error(`Transaction not found on Sepolia: ${sourceTxHash}`);
+  if (!tx) throw new Error(`Transaction not found on ${chain}: ${sourceTxHash}`);
   const blockNumber = tx.blockNumber;
 
-  if (!tx.to || tx.to.toLowerCase() !== AAVE_V3_SEPOLIA_POOL.toLowerCase()) {
+  if (!tx.to || tx.to.toLowerCase() !== poolAddress.toLowerCase()) {
     throw new Error(
-      `${sourceTxHash} was not sent to the Aave Pool contract (expected ${AAVE_V3_SEPOLIA_POOL}, got ${tx.to}). Refusing to prove/score a non-Aave transaction.` 
+      `${sourceTxHash} was not sent to the Pool contract (expected ${poolAddress}, got ${tx.to}). Refusing to prove/score a non-Pool transaction.` 
     );
   }
 
@@ -151,4 +171,4 @@ async function proveTransaction({
   };
 }
 
-module.exports = { proveTransaction, AAVE_V3_SEPOLIA_POOL, CONTRACT_ABI };
+module.exports = { proveTransaction, POOL_BY_CHAIN, CHAIN_IDS, CONTRACT_ABI };

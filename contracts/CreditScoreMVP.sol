@@ -36,10 +36,10 @@ interface INativeQueryVerifierBatch {
 contract CreditScoreMVP {
     INativeQueryVerifier public immutable VERIFIER;
 
-    /// @notice Aave V3 Pool on Ethereum Sepolia. Only transactions sent to
-    /// this address are ever credited — decoded from the verified tx itself,
-    /// not trusted from the caller. Update if Aave redeploys.
-    address public constant AAVE_V3_SEPOLIA_POOL = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
+    /// @notice Mapping of chain keys to pool addresses. Only transactions sent to
+    /// these addresses are ever credited — decoded from the verified tx itself,
+    /// not trusted from the caller. Set by owner via setPoolAddress.
+    mapping(uint64 => address) public poolAddressByChain;
 
     // Must match the indexer's EVENT_NAMES order exactly:
     // ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"]
@@ -96,6 +96,9 @@ contract CreditScoreMVP {
     constructor() {
         VERIFIER = NativeQueryVerifierLib.getVerifier(); // resolves to the 0x0FD2 precompile
         owner = msg.sender;
+        
+        // Initialize with Sepolia pool address
+        poolAddressByChain[11155111] = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
     }
 
     modifier onlyOwner() {
@@ -130,15 +133,23 @@ contract CreditScoreMVP {
         owner = newOwner;
     }
 
+    /// @notice Set the pool address for a specific chain
+    /// @param chainKey Chain identifier
+    /// @param pool Pool address for this chain
+    function setPoolAddress(uint64 chainKey, address pool) external onlyOwner {
+        require(pool != address(0), "Pool address cannot be zero");
+        poolAddressByChain[chainKey] = pool;
+    }
+
     /// @notice Derives the EventType from the verified transaction's own
     /// calldata — never from a caller-supplied parameter. Also enforces that
-    /// the transaction actually targeted the Aave Pool. This is what makes
+    /// the transaction actually targeted the Pool for the given chain. This is what makes
     /// the credited event type as trustless as the "it happened" fact is.
-    function _decodeEventType(bytes memory encodedTx) internal pure returns (EventType) {
+    function _decodeEventType(bytes memory encodedTx, uint64 chainKey) internal view returns (EventType) {
         EvmV1Decoder.CommonTxFields memory common = EvmV1Decoder.decodeCommonTxFields(encodedTx);
 
         require(!common.toIsNull, "tx has no recipient");
-        require(common.to == AAVE_V3_SEPOLIA_POOL, "not an Aave Pool transaction");
+        require(common.to == poolAddressByChain[chainKey], "not a Pool transaction for this chain");
         require(common.data.length >= 4, "calldata too short to contain a selector");
 
         bytes4 selector;
@@ -155,7 +166,7 @@ contract CreditScoreMVP {
         if (selector == SEL_SUPPLY_WITH_PERMIT) return EventType.Supply;
         if (selector == SEL_REPAY_WITH_PERMIT) return EventType.Repay;
         if (selector == SEL_REPAY_WITH_ATOKENS) return EventType.Repay;
-        revert("unrecognized Aave Pool selector");
+        revert("unrecognized Pool selector");
     }
 
     function proveLoanEvent(
@@ -184,7 +195,7 @@ contract CreditScoreMVP {
         // the caller's claim. The claimed value must match — a mismatch
         // means the indexer/off-chain script is wrong, not that we should
         // silently trust it.
-        EventType actualEventType = _decodeEventType(encodedTx);
+        EventType actualEventType = _decodeEventType(encodedTx, chainKey);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven
@@ -264,7 +275,7 @@ contract CreditScoreMVP {
         uint64 height,
         bytes calldata encodedTx
     ) internal {
-        EventType actualEventType = _decodeEventType(encodedTx);
+        EventType actualEventType = _decodeEventType(encodedTx, chainKey);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven

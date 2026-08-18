@@ -12,7 +12,7 @@ router.get('/status', async (req, res, next) => {
     const statuses = await Promise.all(
       checkpoints.map(async (checkpoint) => {
         try {
-          const currentBlock = await getBlockNumber();
+          const currentBlock = await getBlockNumber(checkpoint.chain);
           const lag = currentBlock - checkpoint.lastIndexedBlock;
           
           return {

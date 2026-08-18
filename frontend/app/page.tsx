@@ -129,14 +129,15 @@ export default function Page() {
 
   // Network dropdown state
   const [networkDropdownOpen, setNetworkDropdownOpen] = useState(false)
-  const [selectedChain, setSelectedChain] = useState('Sepolia')
+  const [selectedChain, setSelectedChain] = useState('sepolia')
 
   // Block explorer URLs for different chains
   const getBlockExplorerUrl = (chain: string, address: string) => {
     const explorers: Record<string, string> = {
       'ethereum': `https://etherscan.io/address/${address}`,
       'sepolia': `https://sepolia.etherscan.io/address/${address}`,
-      'cc3 testnet': `https://explorer.testnet.cc3.cloud/address/${address}`,
+      'cc3 testnet': `https://creditcoin3-testnet.subscan.io/address/${address}`,
+      'cc3-testnet': `https://creditcoin3-testnet.subscan.io/address/${address}`,
     }
     return explorers[chain.toLowerCase()] || `https://etherscan.io/address/${address}`
   }
@@ -146,7 +147,8 @@ export default function Page() {
     const explorers: Record<string, string> = {
       'ethereum': `https://etherscan.io/tx/${txHash}`,
       'sepolia': `https://sepolia.etherscan.io/tx/${txHash}`,
-      'cc3 testnet': `https://explorer.testnet.cc3.cloud/tx/${txHash}`,
+      'cc3 testnet': `https://creditcoin3-testnet.subscan.io/tx/${txHash}`,
+      'cc3-testnet': `https://creditcoin3-testnet.subscan.io/tx/${txHash}`,
     }
     return explorers[chain.toLowerCase()] || `https://etherscan.io/tx/${txHash}`
   }
@@ -381,13 +383,13 @@ export default function Page() {
                 chainsData.map(chain => (
                   <button 
                     key={chain.chain}
-                    onClick={() => { setSelectedChain(chain.chain); setNetworkDropdownOpen(false) }}
+                    onClick={() => { setSelectedChain(chain.chain.toLowerCase()); setNetworkDropdownOpen(false) }}
                   >
                     {chain.chain}
                   </button>
                 ))
               ) : (
-                <button onClick={() => { setSelectedChain('Sepolia'); setNetworkDropdownOpen(false) }}>
+                <button onClick={() => { setSelectedChain('sepolia'); setNetworkDropdownOpen(false) }}>
                   Sepolia
                 </button>
               )}

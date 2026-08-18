@@ -8,6 +8,7 @@
     "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
     "prove-queue": "node scripts/proveQueue.js",
     "check-score": "node scripts/checkScore.js",
+    "check-balances": "node scripts/check-balances.js",
     "supply-to-aave": "node scripts/supply-to-aave.js",
     "index": "npm --prefix indexer run index",
     "api": "npm --prefix api run dev"

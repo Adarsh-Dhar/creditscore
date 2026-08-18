@@ -26,12 +26,16 @@ const BATCH_CONTRACT_ABI = [
   "function getStats(address) external view returns (uint64,uint64,uint64,uint64,uint64)",
 ];
 
-// Aave V3 Pool contract on Ethereum Sepolia
-const AAVE_V3_SEPOLIA_POOL = "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951";
+// Pool addresses by chain for validation
+const POOL_BY_CHAIN = {
+  sepolia: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+  "cc3-testnet": process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+};
 
 // Chain ID mappings for supported chains
 const CHAIN_IDS = {
   sepolia: 11155111,
+  "cc3-testnet": 102031, // Creditcoin CC3 Testnet chain ID (tCTC)
   // Add future chains here as needed
   // "base-sepolia": 84532,
 };
@@ -253,7 +257,7 @@ async function submitBatchProof({
 async function processBatch(events, config) {
   const {
     chain,
-    sepoliaRpc,
+    sourceRpc,
     cc3TestnetRpc,
     proverApiUrl,
     privateKey,
@@ -268,13 +272,18 @@ async function processBatch(events, config) {
   log(`\n=== Processing batch of ${events.length} event(s) from ${chain} ===`);
 
   try {
-    const sourceProvider = new JsonRpcProvider(sepoliaRpc);
+    const sourceProvider = new JsonRpcProvider(sourceRpc);
     const creditcoinProvider = new JsonRpcProvider(cc3TestnetRpc);
 
     // Resolve chainKey
     const chainKey = await resolveChainKey(chain, creditcoinProvider, log);
 
-    // Validate all transactions target the Aave Pool
+    // Validate all transactions target the Pool for this chain
+    const poolAddress = POOL_BY_CHAIN[chain];
+    if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
+      throw new BatchProofError(`No pool address configured for chain ${chain}`);
+    }
+
     log(`  validating ${events.length} transaction(s)...`);
     for (const event of events) {
       try {
@@ -283,12 +292,12 @@ async function processBatch(events, config) {
           throw new BatchProofError(`Transaction not found: ${event.txHash}`);
         }
 
-        if (!tx.to || tx.to.toLowerCase() !== AAVE_V3_SEPOLIA_POOL.toLowerCase()) {
+        if (!tx.to || tx.to.toLowerCase() !== poolAddress.toLowerCase()) {
           throw new BatchProofError(
-            `${event.txHash} was not sent to the Aave Pool contract (expected ${AAVE_V3_SEPOLIA_POOL}, got ${tx.to})`
+            `${event.txHash} was not sent to the Pool contract (expected ${poolAddress}, got ${tx.to})`
           );
         }
-        log(`  ✓ ${event.txHash.substring(0, 10)}... valid Aave transaction`);
+        log(`  ✓ ${event.txHash.substring(0, 10)}... valid Pool transaction`);
       } catch (error) {
         log(`  ✗ ${event.txHash.substring(0, 10)}... validation failed: ${error.message}`);
         throw error;
@@ -367,6 +376,7 @@ module.exports = {
   submitBatchProof,
   processBatch,
   CHAIN_IDS,
+  POOL_BY_CHAIN,
   BatchProofError,
   ChainResolutionError,
   ProofGenerationError,

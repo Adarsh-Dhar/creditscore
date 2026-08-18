@@ -12,18 +12,21 @@ const ABI = [
   'function LIQUIDATION_WEIGHT() view returns (int256)'
 ];
 
-let provider;
+// Provider cache keyed by chain name
+const providers = {};
+
 let contract;
 
-function getProvider() {
-  if (!provider) {
-    const rpcUrl = process.env.CC3_TESTNET_RPC || process.env.SEPOLIA_RPC;
+function getProvider(chain = 'cc3-testnet') {
+  if (!providers[chain]) {
+    const rpcEnvVar = `${chain.toUpperCase()}_RPC`;
+    const rpcUrl = process.env[rpcEnvVar];
     if (!rpcUrl) {
-      throw new Error('RPC URL not configured. Set CC3_TESTNET_RPC or SEPOLIA_RPC in .env');
+      throw new Error(`RPC URL not configured for ${chain}. Set ${rpcEnvVar} in .env`);
     }
-    provider = new ethers.JsonRpcProvider(rpcUrl);
+    providers[chain] = new ethers.JsonRpcProvider(rpcUrl);
   }
-  return provider;
+  return providers[chain];
 }
 
 function getContract() {
@@ -32,7 +35,8 @@ function getContract() {
     if (!contractAddress) {
       throw new Error('CONTRACT_ADDRESS not configured in .env');
     }
-    contract = new ethers.Contract(contractAddress, ABI, getProvider());
+    // Contract lives on CC3 Testnet regardless of source chains
+    contract = new ethers.Contract(contractAddress, ABI, getProvider('cc3-testnet'));
   }
   return contract;
 }
@@ -73,10 +77,8 @@ async function getWeights() {
   };
 }
 
-async function getBlockNumber() {
-  // For MVP, we use a single RPC. In production, this would select
-  // the appropriate RPC based on the chain parameter.
-  const provider = getProvider();
+async function getBlockNumber(chain = 'cc3-testnet') {
+  const provider = getProvider(chain);
   return await provider.getBlockNumber();
 }
 
@@ -84,5 +86,6 @@ module.exports = {
   getScore,
   getStats,
   getWeights,
-  getBlockNumber
+  getBlockNumber,
+  getProvider
 };

@@ -14,7 +14,7 @@
 
 require("dotenv").config();
 const { JsonRpcProvider, Contract, Interface } = require("ethers");
-const { CHAINS, POOL_EVENT_ABI, EVENT_NAMES, CHUNK_SIZE } = require("./config");
+const { CHAINS, POOL_EVENT_ABI, CHAIN_EVENT_ABIS, EVENT_NAMES, CHUNK_SIZE } = require("./config");
 const { extractWallet, extractAssetAndAmount } = require("./aaveDecoder");
 const { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, disconnect } = require("./store");
 
@@ -65,7 +65,6 @@ function resolveFromBlock({ cliFromBlock, checkpointBlock, startBlockEnv, latest
 
 async function main() {
   const cli = parseArgs();
-  const iface = new Interface(POOL_EVENT_ABI);
   const seenKeys = await getSeenKeys();
 
   let totalNewCount = 0;
@@ -83,7 +82,9 @@ async function main() {
 
       console.log(`\n=== Processing chain: ${chain} ===`);
       const provider = new JsonRpcProvider(rpcUrl);
-      const contract = new Contract(contractAddress, POOL_EVENT_ABI, provider);
+      const chainAbi = CHAIN_EVENT_ABIS[chain] || POOL_EVENT_ABI;
+      const iface = new Interface(chainAbi);
+      const contract = new Contract(contractAddress, chainAbi, provider);
 
       const checkpoint = await loadCheckpoint(chain, contractAddress);
 

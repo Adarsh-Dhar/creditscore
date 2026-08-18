@@ -26,6 +26,7 @@
  */
 
 require("dotenv").config();
+const { JsonRpcProvider, Wallet, Contract, keccak256, toUtf8Bytes } = require("ethers");
 const { processBatch } = require("./lib/proveBatch");
 const { proveTransaction } = require("./lib/proveTransaction");
 const { EVENT_TYPE_INDEX } = require("./lib/eventTypes");
@@ -125,7 +126,7 @@ async function main() {
       try {
         batchResult = await processBatch(validEvents, {
           chain,
-          sepoliaRpc: chainRpc,
+          sourceRpc: chainRpc,
           cc3TestnetRpc: CC3_TESTNET_RPC,
           proverApiUrl,
           privateKey: PRIVATE_KEY,
@@ -143,7 +144,8 @@ async function main() {
               sourceTxHash: event.txHash,
               targetWallet: event.wallet,
               eventType: event.eventType,
-              sepoliaRpc: chainRpc,
+              sourceRpc: chainRpc,
+              chain,
               cc3TestnetRpc: CC3_TESTNET_RPC,
               proverApiUrl,
               privateKey: PRIVATE_KEY,
@@ -168,7 +170,7 @@ async function main() {
         continue; // Skip the batch result processing since we handled individually
       }
 
-      // Mark all processed events as proven in Postgres
+      // Mark processed events as proven in Postgres (only those actually processed)
       if (batchResult.processed > 0) {
         for (const event of validEvents) {
           await markProven(event.txHash);
@@ -180,10 +182,22 @@ async function main() {
         }
       }
 
+      // Mark only the already-proven events as skipped (not all events)
       if (batchResult.skipped > 0) {
+        // Mark only the specific events that were already proven
+        // The batchResult.alreadyProvenIndices would tell us which ones, but since
+        // we don't have that info returned, we need to check each one
+        const creditcoinProvider = new JsonRpcProvider(CC3_TESTNET_RPC);
+        const wallet = new Wallet(PRIVATE_KEY, creditcoinProvider);
+        const contract = new Contract(CONTRACT_ADDRESS, ["function provenTxHashes(bytes32) view returns (bool)"], wallet);
+        
         for (const event of validEvents) {
-          await markProven(event.txHash);
-          results.skipped.push(event.txHash);
+          const txHashKey = keccak256(toUtf8Bytes(event.txHash));
+          const isProven = await contract.provenTxHashes(txHashKey).catch(() => false);
+          if (isProven) {
+            await markProven(event.txHash);
+            results.skipped.push(event.txHash);
+          }
         }
         console.log(`  ⏭️ skipped: ${batchResult.skipped} already proven event(s)`);
       }
