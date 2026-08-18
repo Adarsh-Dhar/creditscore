@@ -90,21 +90,19 @@ contract CreditScoreMVP {
 
     // Compound Comet function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Compound; anything else reverts.
-    bytes4 constant SEL_COMPOUND_SUPPLY = 0x98610f5c;           // supply(address asset, uint256 amount)
-    bytes4 constant SEL_COMPOUND_SUPPLY_COLLATERAL = 0x9fbf50e0; // supplyCollateral(address asset, uint256 amount)
-    bytes4 constant SEL_COMPOUND_WITHDRAW = 0x539833e8;         // withdraw(address asset, uint256 amount)
-    bytes4 constant SEL_COMPOUND_WITHDRAW_COLLATERAL = 0x33180f32; // withdrawCollateral(address asset, uint256 amount)
+    // Note: Comet uses asset type to distinguish between borrow/repay vs supply/withdraw
+    bytes4 constant SEL_COMPOUND_SUPPLY = 0xf2b9fdb8;           // supply(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_WITHDRAW = 0xf3fef3a3;         // withdraw(address asset, uint256 amount)
     bytes4 constant SEL_COMPOUND_ABSORB = 0x5f8a20a9;           // absorb(address absorber, address[] calldata accounts)
-    bytes4 constant SEL_COMPOUND_BORROW = 0xc6615640;           // borrow(address asset, uint256 amount)
-    bytes4 constant SEL_COMPOUND_REPAY = 0x0d3687d3;            // repay(address asset, uint256 amount)
 
     // Morpho Blue function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Morpho; anything else reverts.
-    bytes4 constant SEL_MORPHO_SUPPLY = 0x9e8c3c24;             // supply(MarketParams marketParams, uint256 amount, address onBehalfOf, uint256 referralCode)
-    bytes4 constant SEL_MORPHO_WITHDRAW = 0x7e26b4c4;            // withdraw(MarketParams marketParams, uint256 amount, address receiver, address owner)
-    bytes4 constant SEL_MORPHO_BORROW = 0xc5b7e5b8;              // borrow(MarketParams marketParams, uint256 amount, address receiver, address onBehalfOf, uint256 referralCode)
-    bytes4 constant SEL_MORPHO_REPAY = 0x8a3316e8;              // repay(MarketParams marketParams, uint256 amount, address onBehalfOf, address receiver)
-    bytes4 constant SEL_MORPHO_LIQUIDATE = 0x9f2c5386;          // liquidate(MarketParams marketParams, address borrower, uint256 amount, address receiver, address onBehalfOf)
+    // Note: Morpho Blue uses MarketParams struct as first argument, so selectors may differ
+    bytes4 constant SEL_MORPHO_SUPPLY = 0x9e8c3c24;           // supply(MarketParams,uint256,address,uint256)
+    bytes4 constant SEL_MORPHO_WITHDRAW = 0x7e26b4c4;          // withdraw(MarketParams,uint256,address,address)
+    bytes4 constant SEL_MORPHO_BORROW = 0xc5b7e5b8;            // borrow(MarketParams,uint256,address,address,uint256)
+    bytes4 constant SEL_MORPHO_REPAY = 0x8a3316e8;              // repay(MarketParams,uint256,address,address)
+    bytes4 constant SEL_MORPHO_LIQUIDATE = 0x9f2c5386;          // liquidate(MarketParams,address,uint256,address,address)
 
     event LoanEventProven(
         address indexed wallet,
@@ -212,14 +210,14 @@ contract CreditScoreMVP {
     }
 
     /// @notice Decode Compound event type from function selector
+    /// Note: For Compound Comet, the actual event type (Supply/Withdraw vs Borrow/Repay)
+    /// is determined by the asset address in the calldata, not the function selector.
+    /// This function decodes the selector only; asset-based classification must be
+    /// done off-chain by the indexer.
     function _decodeCompoundEventType(bytes4 selector) internal pure returns (EventType) {
-        if (selector == SEL_COMPOUND_SUPPLY) return EventType.Supply;
-        if (selector == SEL_COMPOUND_SUPPLY_COLLATERAL) return EventType.Supply;
-        if (selector == SEL_COMPOUND_WITHDRAW) return EventType.Withdraw;
-        if (selector == SEL_COMPOUND_WITHDRAW_COLLATERAL) return EventType.Withdraw;
+        if (selector == SEL_COMPOUND_SUPPLY) return EventType.Supply; // May be reclassified as Repay off-chain
+        if (selector == SEL_COMPOUND_WITHDRAW) return EventType.Withdraw; // May be reclassified as Borrow off-chain
         if (selector == SEL_COMPOUND_ABSORB) return EventType.LiquidationCall;
-        if (selector == SEL_COMPOUND_BORROW) return EventType.Borrow;
-        if (selector == SEL_COMPOUND_REPAY) return EventType.Repay;
         revert("unrecognized Compound selector");
     }
 

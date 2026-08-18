@@ -1,3 +1,31 @@
+// Aave V3 Pool events — taken from Aave V3's IPool ABI
+const AAVE_EVENT_ABI = [
+  "event Supply(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
+  "event Borrow(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint8 interestRateMode, uint256 borrowRate, uint16 indexed referralCode)",
+  "event Repay(address indexed reserve, address indexed user, address indexed repayer, uint256 amount, bool useATokens)",
+  "event Withdraw(address indexed reserve, address indexed user, address indexed to, uint256 amount)",
+  "event LiquidationCall(address indexed collateralAsset, address indexed debtAsset, address indexed user, uint256 debtToCover, uint256 liquidatedCollateralAmount, address liquidator, bool receiveAToken)",
+];
+
+// Compound Comet events — taken from Compound Comet ABI
+// Note: Comet only has Supply/Withdraw/Absorb events. Borrow/Repay are tracked via asset type
+const COMPOUND_EVENT_ABI = [
+  "event Supply(address indexed asset, address indexed from, uint256 amount)",
+  "event Withdraw(address indexed asset, address indexed to, uint256 amount)",
+  "event Absorb(address indexed absorber, address[] indexed accounts)",
+];
+
+// Morpho Blue events — taken from Morpho Blue ABI
+const MORPHO_EVENT_ABI = [
+  "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
+  "event WithdrawCollateral(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount, uint256 shares)",
+  "event Supply(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
+  "event Withdraw(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount, uint256 shares)",
+  "event Borrow(bytes32 indexed id, address indexed borrower, address indexed receiver, uint256 amount, uint256 shares)",
+  "event Repay(bytes32 indexed id, address indexed caller, address indexed onBehalfOf, uint256 amount, uint256 shares)",
+  "event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, address indexed receiver, uint256 amount, uint256 shares)",
+];
+
 // Chain configuration for multi-chain, multi-protocol support
 // Each chain entry defines the RPC URL, chain ID, and nested protocol configurations
 const CHAINS = [
@@ -44,38 +72,6 @@ const CHAINS = [
   // },
 ];
 
-// Aave V3 Pool events — taken from Aave V3's IPool ABI
-const AAVE_EVENT_ABI = [
-  "event Supply(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
-  "event Borrow(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint8 interestRateMode, uint256 borrowRate, uint16 indexed referralCode)",
-  "event Repay(address indexed reserve, address indexed user, address indexed repayer, uint256 amount, bool useATokens)",
-  "event Withdraw(address indexed reserve, address indexed user, address indexed to, uint256 amount)",
-  "event LiquidationCall(address indexed collateralAsset, address indexed debtAsset, address indexed user, uint256 debtToCover, uint256 liquidatedCollateralAmount, address liquidator, bool receiveAToken)",
-];
-
-// Compound Comet events — taken from Compound Comet ABI
-const COMPOUND_EVENT_ABI = [
-  "event Supply(address indexed asset, address indexed from, uint256 amount)",
-  "event SupplyCollateral(address indexed asset, address indexed from, uint256 amount)",
-  "event Withdraw(address indexed asset, address indexed to, uint256 amount)",
-  "event WithdrawCollateral(address indexed asset, address indexed to, uint256 amount)",
-  "event Absorb(address indexed absorber, address[] indexed accounts)",
-  "event Borrow(address indexed asset, address indexed from, uint256 amount)",
-  "event Repay(address indexed asset, address indexed from, uint256 amount)",
-];
-
-// Morpho Blue events — taken from Morpho Blue ABI
-const MORPHO_EVENT_ABI = [
-  "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount)",
-  "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
-  "event WithdrawCollateral(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount)",
-  "event Supply(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount)",
-  "event Withdraw(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount)",
-  "event Borrow(bytes32 indexed id, address indexed borrower, address indexed receiver, uint256 amount)",
-  "event Repay(bytes32 indexed id, address indexed caller, address indexed onBehalfOf, uint256 amount)",
-  "event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, address indexed receiver, uint256 amount)",
-];
-
 // Generic event names used for EventType enum (protocol-agnostic)
 const GENERIC_EVENT_NAMES = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"];
 
@@ -89,13 +85,9 @@ const EVENT_NAME_MAP = {
     "LiquidationCall": "LiquidationCall",
   },
   compound: {
-    "Supply": "Supply",
-    "SupplyCollateral": "Supply",
-    "Withdraw": "Withdraw",
-    "WithdrawCollateral": "Withdraw",
+    "Supply": "Supply", // Will be classified as Supply or Repay based on asset type
+    "Withdraw": "Withdraw", // Will be classified as Withdraw or Borrow based on asset type
     "Absorb": "LiquidationCall",
-    "Borrow": "Borrow",
-    "Repay": "Repay",
   },
   morpho: {
     "SupplyCollateral": "Supply",

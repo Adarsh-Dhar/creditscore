@@ -16,7 +16,7 @@ require("dotenv").config();
 const { JsonRpcProvider, Contract, Interface } = require("ethers");
 const { CHAINS, AAVE_EVENT_ABI, COMPOUND_EVENT_ABI, MORPHO_EVENT_ABI, EVENT_NAME_MAP, GENERIC_EVENT_NAMES, CHUNK_SIZE } = require("./config");
 const { extractWallet: extractAaveWallet, extractAssetAndAmount: extractAaveAssetAndAmount } = require("./aaveDecoder");
-const { extractWallet: extractCompoundWallet, extractAssetAndAmount: extractCompoundAssetAndAmount } = require("./compoundDecoder");
+const { extractWallet: extractCompoundWallet, extractAssetAndAmount: extractCompoundAssetAndAmount, classifyCompoundEvent } = require("./compoundDecoder");
 const { extractWallet: extractMorphoWallet, extractAssetAndAmount: extractMorphoAssetAndAmount } = require("./morphoDecoder");
 const { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, disconnect } = require("./store");
 
@@ -160,7 +160,9 @@ async function main() {
                   ({ asset, amount } = extractAaveAssetAndAmount(eventName, parsed.args));
                 } else if (protocol === "compound") {
                   wallet = extractCompoundWallet(eventName, parsed.args);
-                  ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args));
+                  ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain);
+                  // Classify Compound event based on asset type
+                  eventName = classifyCompoundEvent(eventName, asset, chain);
                 } else if (protocol === "morpho") {
                   wallet = extractMorphoWallet(eventName, parsed.args);
                   ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));
