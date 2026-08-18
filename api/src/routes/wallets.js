@@ -9,7 +9,7 @@ const router = express.Router();
 router.get('/:address/events', async (req, res, next) => {
   try {
     const { address } = req.params;
-    const { eventName, proven, page = 1, limit = 50 } = req.query;
+    const { eventName, proven, protocol, page = 1, limit = 50 } = req.query;
 
     // Validate and checksum address
     if (!ethers.isAddress(address)) {
@@ -23,6 +23,9 @@ router.get('/:address/events', async (req, res, next) => {
     }
     if (proven !== undefined) {
       where.proven = proven === 'true';
+    }
+    if (protocol) {
+      where.protocol = protocol;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -90,12 +93,29 @@ router.get('/:address/summary', async (req, res, next) => {
       orderBy: { blockNumber: 'desc' }
     });
 
+    // Get protocol breakdown from DB (off-chain only)
+    const protocolBreakdown = await prisma.indexedEvent.groupBy({
+      by: ['protocol', 'eventName'],
+      where: { wallet: checksummedAddress },
+      _count: { id: true }
+    });
+
+    // Format protocol breakdown for easier consumption
+    const protocolSummary = {};
+    for (const item of protocolBreakdown) {
+      if (!protocolSummary[item.protocol]) {
+        protocolSummary[item.protocol] = {};
+      }
+      protocolSummary[item.protocol][item.eventName] = item._count.id;
+    }
+
     res.json({
       address: checksummedAddress,
       score,
       stats,
       unprovenCount,
-      lastEventAt: lastEvent?.timestamp ? new Date(lastEvent.timestamp * 1000).toISOString() : null
+      lastEventAt: lastEvent?.timestamp ? new Date(lastEvent.timestamp * 1000).toISOString() : null,
+      protocolBreakdown: protocolSummary
     });
   } catch (error) {
     next(error);

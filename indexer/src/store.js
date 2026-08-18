@@ -55,10 +55,13 @@ async function saveEvent(eventData) {
   });
 }
 
-async function loadUnprovenEvents(limit = 10, chain = null) {
+async function loadUnprovenEvents(limit = 10, chain = null, protocol = null) {
   const where = { proven: false };
   if (chain) {
     where.chain = chain;
+  }
+  if (protocol) {
+    where.protocol = protocol;
   }
   
   return await prisma.indexedEvent.findMany({

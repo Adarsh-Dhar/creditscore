@@ -125,6 +125,7 @@ export default function Page() {
   // Activity pagination and filtering
   const [eventPage, setEventPage] = useState(1)
   const [eventFilter, setEventFilter] = useState<string | null>(null)
+  const [protocolFilter, setProtocolFilter] = useState<string | null>(null)
   const [totalEvents, setTotalEvents] = useState(0)
 
   // Network dropdown state
@@ -247,6 +248,7 @@ export default function Page() {
       try {
         const params: any = { page: eventPage, limit: 50 }
         if (eventFilter) params.eventName = eventFilter
+        if (protocolFilter) params.protocol = protocolFilter
         
         const res = await walletEvents(currentAddress, params)
         setEvents(res.events)
@@ -262,7 +264,7 @@ export default function Page() {
     }
     
     loadFilteredEvents()
-  }, [eventPage, eventFilter, currentAddress])
+  }, [eventPage, eventFilter, protocolFilter, currentAddress])
 
   const handleSearch = () => {
     if (query.trim()) {
@@ -359,6 +361,12 @@ export default function Page() {
     Repay: 'mint',
     Withdraw: 'blue',
     LiquidationCall: 'peach',
+  }
+
+  const protocolColors: Record<string, string> = {
+    aave: 'mint',
+    compound: 'gold',
+    morpho: 'blue',
   }
 
   return (
@@ -647,6 +655,7 @@ export default function Page() {
                       events.slice(0, 5).map((event) => {
                         const Icon = eventIcons[event.eventName] || Activity
                         const color = eventColors[event.eventName] || 'blue'
+                        const protocolColor = protocolColors[event.protocol || 'aave'] || 'blue'
                         return (
                           <div className="activity-row" key={`${event.txHash}-${event.logIndex}`}>
                             <div className={`activity-icon ${color}`}>
@@ -656,6 +665,9 @@ export default function Page() {
                               <strong>{event.eventName}</strong>
                               <span>{event.asset || 'Unknown'} · {event.amount}</span>
                             </div>
+                            <span className={`activity-badge ${protocolColor}`}>
+                              {event.protocol || 'aave'}
+                            </span>
                             <span className="activity-date">
                               {event.timestamp ? new Date(event.timestamp * 1000).toLocaleDateString() : 'N/A'}
                             </span>
@@ -711,6 +723,16 @@ export default function Page() {
                         <option value="Withdraw">Withdraw</option>
                         <option value="LiquidationCall">Liquidation</option>
                       </select>
+                      <select 
+                        className="filter-dropdown" 
+                        value={protocolFilter || ''} 
+                        onChange={(e) => setProtocolFilter(e.target.value || null)}
+                      >
+                        <option value="">All protocols</option>
+                        <option value="aave">Aave</option>
+                        <option value="compound">Compound</option>
+                        <option value="morpho">Morpho</option>
+                      </select>
                       <button className="refresh-button" onClick={handleRefresh} disabled={loading.events}>
                         {loading.events ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
                       </button>
@@ -727,6 +749,7 @@ export default function Page() {
                         {events.map((event) => {
                           const Icon = eventIcons[event.eventName] || Activity
                           const color = eventColors[event.eventName] || 'blue'
+                          const protocolColor = protocolColors[event.protocol || 'aave'] || 'blue'
                           return (
                             <div className="activity-row" key={`${event.txHash}-${event.logIndex}`}>
                               <div className={`activity-icon ${color}`}>
@@ -736,6 +759,9 @@ export default function Page() {
                                 <strong>{event.eventName}</strong>
                                 <span>{event.asset || 'Unknown'} · {event.amount}</span>
                               </div>
+                              <span className={`activity-badge ${protocolColor}`}>
+                                {event.protocol || 'aave'}
+                              </span>
                               <span className="activity-date">
                                 {event.timestamp ? new Date(event.timestamp * 1000).toLocaleString() : 'N/A'}
                               </span>

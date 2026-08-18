@@ -23,6 +23,7 @@ model IndexedEvent {
   asset       String?
   amount      String
   chain       String   @default("sepolia")
+  protocol    String   @default("aave")
   timestamp   Int?
   proven      Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -30,6 +31,7 @@ model IndexedEvent {
   @@unique([txHash, logIndex])
   @@index([wallet])
   @@index([proven])
+  @@index([protocol])
 }
 
 model IndexerCheckpoint {

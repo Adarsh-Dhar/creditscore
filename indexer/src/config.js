@@ -1,30 +1,51 @@
-// Chain configuration for multi-chain support
-// Each chain entry defines the RPC URL, pool address, and chain ID for that network
+// Chain configuration for multi-chain, multi-protocol support
+// Each chain entry defines the RPC URL, chain ID, and nested protocol configurations
 const CHAINS = [
   {
     name: "sepolia",
     rpcEnvVar: "SEPOLIA_RPC",
-    poolAddress: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
     numericChainId: 11155111, // Ethereum Sepolia chain ID
+    protocols: [
+      {
+        id: "aave",
+        poolAddress: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+        abi: AAVE_EVENT_ABI,
+      },
+      {
+        id: "compound",
+        poolAddress: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+        abi: COMPOUND_EVENT_ABI,
+      },
+      {
+        id: "morpho",
+        poolAddress: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
+        abi: MORPHO_EVENT_ABI,
+      },
+    ],
   },
   {
     name: "cc3-testnet",
     rpcEnvVar: "CC3_TESTNET_SOURCE_RPC",
-    poolAddress: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
     numericChainId: 102031, // Creditcoin CC3 Testnet chain ID (tCTC)
+    protocols: [
+      {
+        id: "aave",
+        poolAddress: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+        abi: AAVE_EVENT_ABI,
+      },
+    ],
   },
   // Future chains can be added here:
   // {
   //   name: "base-sepolia",
   //   rpcEnvVar: "BASE_SEPOLIA_RPC",
-  //   poolAddress: "0x...",
   //   numericChainId: 84532,
+  //   protocols: [],
   // },
 ];
 
-// Only the events the indexer cares about. Fragments taken from Aave V3's
-// IPool — double check against the current aave-v3-core ABI if these error.
-const POOL_EVENT_ABI = [
+// Aave V3 Pool events — taken from Aave V3's IPool ABI
+const AAVE_EVENT_ABI = [
   "event Supply(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
   "event Borrow(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint8 interestRateMode, uint256 borrowRate, uint16 indexed referralCode)",
   "event Repay(address indexed reserve, address indexed user, address indexed repayer, uint256 amount, bool useATokens)",
@@ -32,15 +53,80 @@ const POOL_EVENT_ABI = [
   "event LiquidationCall(address indexed collateralAsset, address indexed debtAsset, address indexed user, uint256 debtToCover, uint256 liquidatedCollateralAmount, address liquidator, bool receiveAToken)",
 ];
 
-// Per-chain ABI support - add different ABIs here if protocols have different event signatures
-// For now, all chains use the same Aave-compatible ABI
-const CHAIN_EVENT_ABIS = {
-  sepolia: POOL_EVENT_ABI,
-  "cc3-testnet": POOL_EVENT_ABI, // Update if CC3 Testnet uses different protocol
-};
+// Compound Comet events — taken from Compound Comet ABI
+const COMPOUND_EVENT_ABI = [
+  "event Supply(address indexed asset, address indexed from, uint256 amount)",
+  "event SupplyCollateral(address indexed asset, address indexed from, uint256 amount)",
+  "event Withdraw(address indexed asset, address indexed to, uint256 amount)",
+  "event WithdrawCollateral(address indexed asset, address indexed to, uint256 amount)",
+  "event Absorb(address indexed absorber, address[] indexed accounts)",
+  "event Borrow(address indexed asset, address indexed from, uint256 amount)",
+  "event Repay(address indexed asset, address indexed from, uint256 amount)",
+];
 
-const EVENT_NAMES = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"];
+// Morpho Blue events — taken from Morpho Blue ABI
+const MORPHO_EVENT_ABI = [
+  "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount)",
+  "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
+  "event WithdrawCollateral(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount)",
+  "event Supply(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount)",
+  "event Withdraw(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount)",
+  "event Borrow(bytes32 indexed id, address indexed borrower, address indexed receiver, uint256 amount)",
+  "event Repay(bytes32 indexed id, address indexed caller, address indexed onBehalfOf, uint256 amount)",
+  "event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, address indexed receiver, uint256 amount)",
+];
+
+// Generic event names used for EventType enum (protocol-agnostic)
+const GENERIC_EVENT_NAMES = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"];
+
+// Protocol-specific event name mapping to generic EventType
+const EVENT_NAME_MAP = {
+  aave: {
+    "Supply": "Supply",
+    "Borrow": "Borrow",
+    "Repay": "Repay",
+    "Withdraw": "Withdraw",
+    "LiquidationCall": "LiquidationCall",
+  },
+  compound: {
+    "Supply": "Supply",
+    "SupplyCollateral": "Supply",
+    "Withdraw": "Withdraw",
+    "WithdrawCollateral": "Withdraw",
+    "Absorb": "LiquidationCall",
+    "Borrow": "Borrow",
+    "Repay": "Repay",
+  },
+  morpho: {
+    "SupplyCollateral": "Supply",
+    "Supply": "Supply",
+    "WithdrawCollateral": "Withdraw",
+    "Withdraw": "Withdraw",
+    "Borrow": "Borrow",
+    "Repay": "Repay",
+    "Liquidate": "LiquidationCall",
+  },
+};
 
 const CHUNK_SIZE = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
 
-module.exports = { CHAINS, POOL_EVENT_ABI, CHAIN_EVENT_ABIS, EVENT_NAMES, CHUNK_SIZE };
+// Backward compatibility exports
+const POOL_EVENT_ABI = AAVE_EVENT_ABI;
+const CHAIN_EVENT_ABIS = {
+  sepolia: AAVE_EVENT_ABI,
+  "cc3-testnet": AAVE_EVENT_ABI,
+};
+const EVENT_NAMES = GENERIC_EVENT_NAMES;
+
+module.exports = { 
+  CHAINS, 
+  AAVE_EVENT_ABI, 
+  COMPOUND_EVENT_ABI, 
+  MORPHO_EVENT_ABI, 
+  POOL_EVENT_ABI, 
+  CHAIN_EVENT_ABIS, 
+  EVENT_NAMES, 
+  GENERIC_EVENT_NAMES, 
+  EVENT_NAME_MAP, 
+  CHUNK_SIZE 
+};

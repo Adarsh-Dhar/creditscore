@@ -28,16 +28,29 @@ const { chainInfo, proofProvider } = require("@gluwa/usc-sdk");
 
 // ABI without parameter names (Solidity selectors don't include parameter names)
 const CONTRACT_ABI = [
-  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32,uint8) external",
+  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32,uint8,uint8) external",
   "function score(address) external view returns (uint256)",
   "function provenTxHashes(bytes32) external view returns (bool)",
   "function getStats(address) external view returns (uint64,uint64,uint64,uint64,uint64)",
 ];
 
-// Pool addresses by chain for validation
-const POOL_BY_CHAIN = {
-  sepolia: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
-  "cc3-testnet": process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+// Pool addresses by chain and protocol for validation
+const POOL_BY_CHAIN_AND_PROTOCOL = {
+  sepolia: {
+    aave: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+    compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+    morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
+  },
+  "cc3-testnet": {
+    aave: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+  },
+};
+
+// Protocol ID mappings
+const PROTOCOL_IDS = {
+  aave: 0,
+  compound: 1,
+  morpho: 2,
 };
 
 // Chain ID mappings for supported chains
@@ -53,6 +66,7 @@ const CHAIN_IDS = {
  * @param {number} params.eventType      EventType enum index (see lib/eventTypes.js).
  * @param {string} params.sourceRpc      Source chain RPC URL.
  * @param {string} params.chain          Chain name (e.g., "sepolia", "cc3-testnet").
+ * @param {string} params.protocol       Protocol name (e.g., "aave", "compound", "morpho").
  * @param {string} params.cc3TestnetRpc
  * @param {string} params.proverApiUrl
  * @param {string} params.privateKey
@@ -66,6 +80,7 @@ async function proveTransaction({
   eventType,
   sourceRpc,
   chain,
+  protocol,
   cc3TestnetRpc,
   proverApiUrl,
   privateKey,
@@ -74,6 +89,10 @@ async function proveTransaction({
 }) {
   if (eventType === undefined || eventType === null) {
     throw new Error(`No eventType provided for ${sourceTxHash}.`);
+  }
+
+  if (!protocol) {
+    throw new Error(`No protocol provided for ${sourceTxHash}.`);
   }
 
   const sourceProvider = new JsonRpcProvider(sourceRpc);
@@ -97,9 +116,14 @@ async function proveTransaction({
   const chainKey = chainEntry.chainKey;
 
   // --- Step 2: locate the transaction's block, guard it's a Pool tx ---
-  const poolAddress = POOL_BY_CHAIN[chain];
+  const poolAddress = POOL_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
   if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
-    throw new Error(`No pool address configured for chain ${chain}`);
+    throw new Error(`No pool address configured for chain ${chain} and protocol ${protocol}`);
+  }
+
+  const protocolId = PROTOCOL_IDS[protocol];
+  if (protocolId === undefined) {
+    throw new Error(`Unknown protocol: ${protocol}`);
   }
 
   const tx = await sourceProvider.getTransaction(sourceTxHash);
@@ -152,7 +176,8 @@ async function proveTransaction({
     continuityProof.lowerEndpointDigest,
     continuityProof.roots,
     txHashKey,
-    eventType
+    eventType,
+    protocolId
   );
   log(`  tx submitted: ${submitTx.hash}`);
   await submitTx.wait();
@@ -171,4 +196,10 @@ async function proveTransaction({
   };
 }
 
-module.exports = { proveTransaction, POOL_BY_CHAIN, CHAIN_IDS, CONTRACT_ABI };
+// Backward compatibility export
+const POOL_BY_CHAIN = {};
+for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
+  POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
+}
+
+module.exports = { proveTransaction, POOL_BY_CHAIN_AND_PROTOCOL, POOL_BY_CHAIN, PROTOCOL_IDS, CHAIN_IDS, CONTRACT_ABI };

@@ -19,17 +19,30 @@ const { chainInfo, proofProvider } = require("@gluwa/usc-sdk");
 
 // Batch contract ABI - using minimal interface for batch function
 const BATCH_CONTRACT_ABI = [
-  "function proveLoanEventsBatch(address[],uint8[],bytes32[],uint64,uint64[],bytes[],(bytes32,(bytes32,bool)[])[],(bytes32,bytes32[])) external",
-  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32,uint8) external",
+  "function proveLoanEventsBatch(address[],uint8[],bytes32[],uint64,uint8,uint64[],bytes[],(bytes32,(bytes32,bool)[])[],(bytes32,bytes32[])) external",
+  "function proveLoanEvent(address,uint64,uint64,bytes,bytes32,(bytes32,bool)[],bytes32,bytes32[],bytes32,uint8,uint8) external",
   "function score(address) external view returns (uint256)",
   "function provenTxHashes(bytes32) external view returns (bool)",
   "function getStats(address) external view returns (uint64,uint64,uint64,uint64,uint64)",
 ];
 
-// Pool addresses by chain for validation
-const POOL_BY_CHAIN = {
-  sepolia: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
-  "cc3-testnet": process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+// Pool addresses by chain and protocol for validation
+const POOL_BY_CHAIN_AND_PROTOCOL = {
+  sepolia: {
+    aave: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+    compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+    morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
+  },
+  "cc3-testnet": {
+    aave: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
+  },
+};
+
+// Protocol ID mappings
+const PROTOCOL_IDS = {
+  aave: 0,
+  compound: 1,
+  morpho: 2,
 };
 
 // Chain ID mappings for supported chains
@@ -224,6 +237,7 @@ async function submitBatchProof({
       eventTypes,
       txHashKeys,
       chainKey,
+      protocolId,
       headers,
       txBytes,
       contractMerkleProofs,
@@ -249,14 +263,15 @@ async function submitBatchProof({
 }
 
 /**
- * Process a batch of events from the same chain
- * @param {Array} events - Array of events to process (must be from same chain)
+ * Process a batch of events from the same chain and protocol
+ * @param {Array} events - Array of events to process (must be from same chain and protocol)
  * @param {object} config - Configuration object
  * @returns {Promise<object>} Processing result
  */
 async function processBatch(events, config) {
   const {
     chain,
+    protocol,
     sourceRpc,
     cc3TestnetRpc,
     proverApiUrl,
@@ -269,7 +284,11 @@ async function processBatch(events, config) {
     return { processed: 0, skipped: 0, failed: 0 };
   }
 
-  log(`\n=== Processing batch of ${events.length} event(s) from ${chain} ===`);
+  if (!protocol) {
+    throw new BatchProofError(`Protocol not specified for batch processing`);
+  }
+
+  log(`\n=== Processing batch of ${events.length} event(s) from ${chain} (${protocol}) ===`);
 
   try {
     const sourceProvider = new JsonRpcProvider(sourceRpc);
@@ -278,10 +297,15 @@ async function processBatch(events, config) {
     // Resolve chainKey
     const chainKey = await resolveChainKey(chain, creditcoinProvider, log);
 
-    // Validate all transactions target the Pool for this chain
-    const poolAddress = POOL_BY_CHAIN[chain];
+    // Validate all transactions target the Pool for this chain and protocol
+    const poolAddress = POOL_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
     if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
-      throw new BatchProofError(`No pool address configured for chain ${chain}`);
+      throw new BatchProofError(`No pool address configured for chain ${chain} and protocol ${protocol}`);
+    }
+
+    const protocolId = PROTOCOL_IDS[protocol];
+    if (protocolId === undefined) {
+      throw new BatchProofError(`Unknown protocol: ${protocol}`);
     }
 
     log(`  validating ${events.length} transaction(s)...`);
@@ -369,6 +393,12 @@ async function processBatch(events, config) {
   }
 }
 
+// Backward compatibility export
+const POOL_BY_CHAIN = {};
+for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
+  POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
+}
+
 module.exports = {
   resolveChainKey,
   generateBatchProof,
@@ -376,7 +406,9 @@ module.exports = {
   submitBatchProof,
   processBatch,
   CHAIN_IDS,
+  POOL_BY_CHAIN_AND_PROTOCOL,
   POOL_BY_CHAIN,
+  PROTOCOL_IDS,
   BatchProofError,
   ChainResolutionError,
   ProofGenerationError,

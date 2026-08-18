@@ -35,17 +35,18 @@ const { loadUnprovenEvents, markProven, disconnect } = require("../indexer/src/s
 const BATCH_SIZE = Number(process.env.PROVE_BATCH_SIZE || 10);
 
 /**
- * Group events by chain name
- * @param {Array} events - Array of events with chain property
- * @returns {Object} Events grouped by chain
+ * Group events by chain and protocol
+ * @param {Array} events - Array of events with chain and protocol properties
+ * @returns {Object} Events grouped by chain and protocol
  */
-function groupByChain(events) {
+function groupByChainAndProtocol(events) {
   const grouped = {};
   for (const event of events) {
-    if (!grouped[event.chain]) {
-      grouped[event.chain] = [];
+    const key = `${event.chain}:${event.protocol || 'aave'}`; // Default to 'aave' for backward compatibility
+    if (!grouped[key]) {
+      grouped[key] = [];
     }
-    grouped[event.chain].push(event);
+    grouped[key].push(event);
   }
   return grouped;
 }
@@ -90,42 +91,44 @@ async function main() {
 
   console.log(`Found ${events.length} unproven event(s) — processing in batches of up to ${BATCH_SIZE}.`);
 
-  // Group events by chain
-  const eventsByChain = groupByChain(events);
-  console.log(`Events grouped by chain: ${Object.keys(eventsByChain).join(", ")}`);
+  // Group events by chain and protocol
+  const eventsByChainAndProtocol = groupByChainAndProtocol(events);
+  console.log(`Events grouped by chain:protocol: ${Object.keys(eventsByChainAndProtocol).join(", ")}`);
 
   const results = { proven: [], skipped: [], failed: [] };
 
-  // Process each chain group
-  for (const [chain, chainEvents] of Object.entries(eventsByChain)) {
-    console.log(`\n=== Processing ${chainEvents.length} event(s) from ${chain} ===`);
+  // Process each chain:protocol group
+  for (const [chainProtocolKey, groupEvents] of Object.entries(eventsByChainAndProtocol)) {
+    const [chain, protocol] = chainProtocolKey.split(':');
+    console.log(`\n=== Processing ${groupEvents.length} event(s) from ${chain} (${protocol}) ===`);
 
     try {
       const chainRpc = getRpcForChain(chain);
 
       // Validate event types
       const validEvents = [];
-      for (const event of chainEvents) {
+      for (const event of groupEvents) {
         const eventType = EVENT_TYPE_INDEX[event.eventName];
         if (eventType === undefined) {
           const msg = `unrecognized eventName "${event.eventName}"`;
           console.error(`  ! ${msg} for tx ${event.txHash}, skipping.`);
           results.failed.push({ txHash: event.txHash, error: msg });
         } else {
-          validEvents.push({ ...event, eventType });
+          validEvents.push({ ...event, eventType, protocol: event.protocol || 'aave' });
         }
       }
 
       if (validEvents.length === 0) {
-        console.log(`  No valid events to process for ${chain}.`);
+        console.log(`  No valid events to process for ${chain}:${protocol}.`);
         continue;
       }
 
-      // Process batch for this chain
+      // Process batch for this chain:protocol
       let batchResult;
       try {
         batchResult = await processBatch(validEvents, {
           chain,
+          protocol,
           sourceRpc: chainRpc,
           cc3TestnetRpc: CC3_TESTNET_RPC,
           proverApiUrl,
@@ -146,6 +149,7 @@ async function main() {
               eventType: event.eventType,
               sourceRpc: chainRpc,
               chain,
+              protocol: event.protocol || 'aave',
               cc3TestnetRpc: CC3_TESTNET_RPC,
               proverApiUrl,
               privateKey: PRIVATE_KEY,
@@ -203,12 +207,12 @@ async function main() {
       }
 
     } catch (err) {
-      console.error(`  ! batch processing failed for ${chain}: ${err.message}`);
-      // Mark all events in this chain group as failed
-      for (const event of chainEvents) {
+      console.error(`  ! batch processing failed for ${chain}:${protocol}: ${err.message}`);
+      // Mark all events in this chain:protocol group as failed
+      for (const event of groupEvents) {
         results.failed.push({ txHash: event.txHash, error: err.message });
       }
-      // Continue with other chains even if one fails
+      // Continue with other groups even if one fails
     }
   }
 

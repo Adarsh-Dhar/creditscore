@@ -36,10 +36,17 @@ interface INativeQueryVerifierBatch {
 contract CreditScoreMVP {
     INativeQueryVerifier public immutable VERIFIER;
 
-    /// @notice Mapping of chain keys to pool addresses. Only transactions sent to
+    /// @notice Protocol identifiers for multi-protocol support
+    enum ProtocolId {
+        Aave,      // 0
+        Compound,  // 1
+        Morpho     // 2
+    }
+
+    /// @notice Mapping of chain keys and protocol IDs to pool addresses. Only transactions sent to
     /// these addresses are ever credited — decoded from the verified tx itself,
     /// not trusted from the caller. Set by owner via setPoolAddress.
-    mapping(uint64 => address) public poolAddressByChain;
+    mapping(uint64 => mapping(uint8 => address)) public poolAddressByChainAndProtocol;
 
     // Must match the indexer's EVENT_NAMES order exactly:
     // ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"]
@@ -71,22 +78,41 @@ contract CreditScoreMVP {
     mapping(bytes32 => bool) public provenTxHashes;
 
     // Aave V3 Pool function selectors — keccak256(signature)[:4]. These are
-    // the only actions this contract will ever credit; anything else reverts.
-    bytes4 constant SEL_SUPPLY = 0x617ba037;                // supply(address,uint256,address,uint16)
-    bytes4 constant SEL_BORROW = 0xa415bcad;                 // borrow(address,uint256,uint256,uint16,address)
-    bytes4 constant SEL_REPAY = 0x573ade81;                 // repay(address,uint256,uint256,address)
-    bytes4 constant SEL_WITHDRAW = 0x69328dec;              // withdraw(address,uint256,address)
-    bytes4 constant SEL_LIQUIDATION_CALL = 0x00a718a9;      // liquidationCall(address,address,address,uint256,bool)
-    bytes4 constant SEL_SUPPLY_WITH_PERMIT = 0xf5660694;    // supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)
-    bytes4 constant SEL_REPAY_WITH_PERMIT = 0x5cfc1b2c;     // repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)
-    bytes4 constant SEL_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
+    // the only actions this contract will ever credit for Aave; anything else reverts.
+    bytes4 constant SEL_AAVE_SUPPLY = 0x617ba037;                // supply(address,uint256,address,uint16)
+    bytes4 constant SEL_AAVE_BORROW = 0xa415bcad;                 // borrow(address,uint256,uint256,uint16,address)
+    bytes4 constant SEL_AAVE_REPAY = 0x573ade81;                 // repay(address,uint256,uint256,address)
+    bytes4 constant SEL_AAVE_WITHDRAW = 0x69328dec;              // withdraw(address,uint256,address)
+    bytes4 constant SEL_AAVE_LIQUIDATION_CALL = 0x00a718a9;      // liquidationCall(address,address,address,uint256,bool)
+    bytes4 constant SEL_AAVE_SUPPLY_WITH_PERMIT = 0xf5660694;    // supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_AAVE_REPAY_WITH_PERMIT = 0x5cfc1b2c;     // repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_AAVE_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
+
+    // Compound Comet function selectors — keccak256(signature)[:4]. These are
+    // the only actions this contract will ever credit for Compound; anything else reverts.
+    bytes4 constant SEL_COMPOUND_SUPPLY = 0x98610f5c;           // supply(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_SUPPLY_COLLATERAL = 0x9fbf50e0; // supplyCollateral(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_WITHDRAW = 0x539833e8;         // withdraw(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_WITHDRAW_COLLATERAL = 0x33180f32; // withdrawCollateral(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_ABSORB = 0x5f8a20a9;           // absorb(address absorber, address[] calldata accounts)
+    bytes4 constant SEL_COMPOUND_BORROW = 0xc6615640;           // borrow(address asset, uint256 amount)
+    bytes4 constant SEL_COMPOUND_REPAY = 0x0d3687d3;            // repay(address asset, uint256 amount)
+
+    // Morpho Blue function selectors — keccak256(signature)[:4]. These are
+    // the only actions this contract will ever credit for Morpho; anything else reverts.
+    bytes4 constant SEL_MORPHO_SUPPLY = 0x9e8c3c24;             // supply(MarketParams marketParams, uint256 amount, address onBehalfOf, uint256 referralCode)
+    bytes4 constant SEL_MORPHO_WITHDRAW = 0x7e26b4c4;            // withdraw(MarketParams marketParams, uint256 amount, address receiver, address owner)
+    bytes4 constant SEL_MORPHO_BORROW = 0xc5b7e5b8;              // borrow(MarketParams marketParams, uint256 amount, address receiver, address onBehalfOf, uint256 referralCode)
+    bytes4 constant SEL_MORPHO_REPAY = 0x8a3316e8;              // repay(MarketParams marketParams, uint256 amount, address onBehalfOf, address receiver)
+    bytes4 constant SEL_MORPHO_LIQUIDATE = 0x9f2c5386;          // liquidate(MarketParams marketParams, address borrower, uint256 amount, address receiver, address onBehalfOf)
 
     event LoanEventProven(
         address indexed wallet,
         uint256 chainKey,
         uint256 blockHeight,
         bytes32 txHashKey,
-        EventType eventType
+        EventType eventType,
+        uint8 protocolId
     );
 
     event CorruptedProofReset(bytes32 indexed txHashKey, address indexed wallet);
@@ -97,8 +123,8 @@ contract CreditScoreMVP {
         VERIFIER = NativeQueryVerifierLib.getVerifier(); // resolves to the 0x0FD2 precompile
         owner = msg.sender;
         
-        // Initialize with Sepolia pool address
-        poolAddressByChain[11155111] = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
+        // Initialize with Sepolia Aave pool address
+        poolAddressByChainAndProtocol[11155111][uint8(ProtocolId.Aave)] = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
     }
 
     modifier onlyOwner() {
@@ -133,23 +159,25 @@ contract CreditScoreMVP {
         owner = newOwner;
     }
 
-    /// @notice Set the pool address for a specific chain
+    /// @notice Set the pool address for a specific chain and protocol
     /// @param chainKey Chain identifier
-    /// @param pool Pool address for this chain
-    function setPoolAddress(uint64 chainKey, address pool) external onlyOwner {
+    /// @param protocolId Protocol identifier (0=Aave, 1=Compound, 2=Morpho)
+    /// @param pool Pool address for this chain and protocol
+    function setPoolAddress(uint64 chainKey, uint8 protocolId, address pool) external onlyOwner {
         require(pool != address(0), "Pool address cannot be zero");
-        poolAddressByChain[chainKey] = pool;
+        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        poolAddressByChainAndProtocol[chainKey][protocolId] = pool;
     }
 
     /// @notice Derives the EventType from the verified transaction's own
     /// calldata — never from a caller-supplied parameter. Also enforces that
-    /// the transaction actually targeted the Pool for the given chain. This is what makes
+    /// the transaction actually targeted the Pool for the given chain and protocol. This is what makes
     /// the credited event type as trustless as the "it happened" fact is.
-    function _decodeEventType(bytes memory encodedTx, uint64 chainKey) internal view returns (EventType) {
+    function _decodeEventType(bytes memory encodedTx, uint64 chainKey, uint8 protocolId) internal view returns (EventType) {
         EvmV1Decoder.CommonTxFields memory common = EvmV1Decoder.decodeCommonTxFields(encodedTx);
 
         require(!common.toIsNull, "tx has no recipient");
-        require(common.to == poolAddressByChain[chainKey], "not a Pool transaction for this chain");
+        require(common.to == poolAddressByChainAndProtocol[chainKey][protocolId], "not a Pool transaction for this chain and protocol");
         require(common.data.length >= 4, "calldata too short to contain a selector");
 
         bytes4 selector;
@@ -158,15 +186,51 @@ contract CreditScoreMVP {
             selector := mload(add(data, 32))
         }
 
-        if (selector == SEL_SUPPLY) return EventType.Supply;
-        if (selector == SEL_BORROW) return EventType.Borrow;
-        if (selector == SEL_REPAY) return EventType.Repay;
-        if (selector == SEL_WITHDRAW) return EventType.Withdraw;
-        if (selector == SEL_LIQUIDATION_CALL) return EventType.LiquidationCall;
-        if (selector == SEL_SUPPLY_WITH_PERMIT) return EventType.Supply;
-        if (selector == SEL_REPAY_WITH_PERMIT) return EventType.Repay;
-        if (selector == SEL_REPAY_WITH_ATOKENS) return EventType.Repay;
-        revert("unrecognized Pool selector");
+        // Protocol-specific selector decoding
+        if (protocolId == uint8(ProtocolId.Aave)) {
+            return _decodeAaveEventType(selector);
+        } else if (protocolId == uint8(ProtocolId.Compound)) {
+            return _decodeCompoundEventType(selector);
+        } else if (protocolId == uint8(ProtocolId.Morpho)) {
+            return _decodeMorphoEventType(selector);
+        } else {
+            revert("invalid protocol ID");
+        }
+    }
+
+    /// @notice Decode Aave event type from function selector
+    function _decodeAaveEventType(bytes4 selector) internal pure returns (EventType) {
+        if (selector == SEL_AAVE_SUPPLY) return EventType.Supply;
+        if (selector == SEL_AAVE_BORROW) return EventType.Borrow;
+        if (selector == SEL_AAVE_REPAY) return EventType.Repay;
+        if (selector == SEL_AAVE_WITHDRAW) return EventType.Withdraw;
+        if (selector == SEL_AAVE_LIQUIDATION_CALL) return EventType.LiquidationCall;
+        if (selector == SEL_AAVE_SUPPLY_WITH_PERMIT) return EventType.Supply;
+        if (selector == SEL_AAVE_REPAY_WITH_PERMIT) return EventType.Repay;
+        if (selector == SEL_AAVE_REPAY_WITH_ATOKENS) return EventType.Repay;
+        revert("unrecognized Aave selector");
+    }
+
+    /// @notice Decode Compound event type from function selector
+    function _decodeCompoundEventType(bytes4 selector) internal pure returns (EventType) {
+        if (selector == SEL_COMPOUND_SUPPLY) return EventType.Supply;
+        if (selector == SEL_COMPOUND_SUPPLY_COLLATERAL) return EventType.Supply;
+        if (selector == SEL_COMPOUND_WITHDRAW) return EventType.Withdraw;
+        if (selector == SEL_COMPOUND_WITHDRAW_COLLATERAL) return EventType.Withdraw;
+        if (selector == SEL_COMPOUND_ABSORB) return EventType.LiquidationCall;
+        if (selector == SEL_COMPOUND_BORROW) return EventType.Borrow;
+        if (selector == SEL_COMPOUND_REPAY) return EventType.Repay;
+        revert("unrecognized Compound selector");
+    }
+
+    /// @notice Decode Morpho event type from function selector
+    function _decodeMorphoEventType(bytes4 selector) internal pure returns (EventType) {
+        if (selector == SEL_MORPHO_SUPPLY) return EventType.Supply;
+        if (selector == SEL_MORPHO_WITHDRAW) return EventType.Withdraw;
+        if (selector == SEL_MORPHO_BORROW) return EventType.Borrow;
+        if (selector == SEL_MORPHO_REPAY) return EventType.Repay;
+        if (selector == SEL_MORPHO_LIQUIDATE) return EventType.LiquidationCall;
+        revert("unrecognized Morpho selector");
     }
 
     function proveLoanEvent(
@@ -179,9 +243,11 @@ contract CreditScoreMVP {
         bytes32 lowerEndpointDigest,
         bytes32[] calldata continuityRoots,
         bytes32 txHashKey,
-        EventType claimedEventType
+        EventType claimedEventType,
+        uint8 protocolId
     ) external {
         require(!provenTxHashes[txHashKey], "already proven");
+        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
 
         INativeQueryVerifier.MerkleProof memory merkleProof =
             INativeQueryVerifier.MerkleProof({root: merkleRoot, siblings: siblings});
@@ -195,22 +261,23 @@ contract CreditScoreMVP {
         // the caller's claim. The claimed value must match — a mismatch
         // means the indexer/off-chain script is wrong, not that we should
         // silently trust it.
-        EventType actualEventType = _decodeEventType(encodedTx, chainKey);
+        EventType actualEventType = _decodeEventType(encodedTx, chainKey, protocolId);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven
         // This prevents corrupted state if transaction fails mid-execution
         _creditWallet(wallet, actualEventType);
-        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, actualEventType);
+        emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, actualEventType, protocolId);
         provenTxHashes[txHashKey] = true;
     }
 
     /// @notice Batch version of proveLoanEvent - proves multiple events in a single transaction
-    /// @dev All events in the batch must be from the same chain (same chainKey)
+    /// @dev All events in the batch must be from the same chain (same chainKey) and same protocol
     /// @param wallets Array of wallet addresses to credit
     /// @param eventTypes Array of event types for each wallet
     /// @param txHashKeys Array of keccak256(txHash) for deduplication
     /// @param chainKey Chain identifier (must be the same for all events)
+    /// @param protocolId Protocol identifier (must be the same for all events)
     /// @param heights Array of block heights for each transaction
     /// @param encodedTxs Array of encoded transaction bytes
     /// @param merkleProofs Array of Merkle proofs for each transaction
@@ -220,6 +287,7 @@ contract CreditScoreMVP {
         EventType[] calldata eventTypes,
         bytes32[] calldata txHashKeys,
         uint64 chainKey,
+        uint8 protocolId,
         uint64[] calldata heights,
         bytes[] calldata encodedTxs,
         INativeQueryVerifier.MerkleProof[] calldata merkleProofs,
@@ -235,6 +303,7 @@ contract CreditScoreMVP {
         );
         require(wallets.length > 0, "Empty batch");
         require(wallets.length <= 10, "Batch too large - max 10 events");
+        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
 
         // Check for already-proven transactions (cannot bypass deduplication)
         for (uint i = 0; i < txHashKeys.length; i++) {
@@ -260,7 +329,7 @@ contract CreditScoreMVP {
         // overflows the Yul stack given how many parameters/locals this
         // function already carries.
         for (uint i = 0; i < wallets.length; i++) {
-            _creditBatchEvent(wallets[i], eventTypes[i], txHashKeys[i], chainKey, heights[i], encodedTxs[i]);
+            _creditBatchEvent(wallets[i], eventTypes[i], txHashKeys[i], chainKey, protocolId, heights[i], encodedTxs[i]);
         }
     }
 
@@ -272,16 +341,17 @@ contract CreditScoreMVP {
         EventType claimedEventType,
         bytes32 txHashKey,
         uint64 chainKey,
+        uint8 protocolId,
         uint64 height,
         bytes calldata encodedTx
     ) internal {
-        EventType actualEventType = _decodeEventType(encodedTx, chainKey);
+        EventType actualEventType = _decodeEventType(encodedTx, chainKey, protocolId);
         require(actualEventType == claimedEventType, "claimed eventType does not match decoded tx");
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven
         // This prevents corrupted state if transaction fails mid-execution
         _creditWallet(wallet, actualEventType);
-        emit LoanEventProven(wallet, chainKey, height, txHashKey, actualEventType);
+        emit LoanEventProven(wallet, chainKey, height, txHashKey, actualEventType, protocolId);
         provenTxHashes[txHashKey] = true;
     }
 
