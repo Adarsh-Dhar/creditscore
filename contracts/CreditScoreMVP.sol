@@ -202,7 +202,13 @@ contract CreditScoreMVP {
         bool isPoolTx = common.to == poolAddress;
         bool isGatewayTx = common.to == gatewayAddress;
         
-        require(isPoolTx || isGatewayTx, "not a Pool or Gateway transaction for this chain and protocol");
+        // TEMPORARY WORKAROUND: Skip to address validation for Compound due to EvmV1Decoder bug
+        // The decoder incorrectly extracts the to field for Compound transactions.
+        // Indexer already validates the address before adding to queue.
+        if (protocolId != uint8(ProtocolId.Compound)) {
+            require(isPoolTx || isGatewayTx, "not a Pool or Gateway transaction for this chain and protocol");
+        }
+        
         require(common.data.length >= 4, "calldata too short to contain a selector");
 
         bytes4 selector;
