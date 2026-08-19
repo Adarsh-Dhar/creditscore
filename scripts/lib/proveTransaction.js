@@ -49,7 +49,7 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
 // WETHGateway addresses by chain and protocol for validation
 const WETHGATEWAY_BY_CHAIN_AND_PROTOCOL = {
   sepolia: {
-    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000",
+    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x387d311e47e80b498169e6fb51d3193167d89F7D",
   },
 };
 

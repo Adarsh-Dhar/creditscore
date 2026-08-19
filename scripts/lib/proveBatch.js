@@ -41,7 +41,7 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
 // WETHGateway addresses by chain and protocol for validation
 const WETHGATEWAY_BY_CHAIN_AND_PROTOCOL = {
   sepolia: {
-    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000",
+    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x387d311e47e80b498169e6fb51d3193167d89F7D",
   },
 };
 
@@ -408,11 +408,6 @@ async function processBatch(events, config) {
   }
 }
 
-// Backward compatibility export
-const POOL_BY_CHAIN = {};
-for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
-  POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
-}
 
 module.exports = {
   resolveChainKey,
@@ -435,4 +430,5 @@ const POOL_BY_CHAIN = {};
 for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
   POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
 }
+module.exports.POOL_BY_CHAIN = POOL_BY_CHAIN;
 module.exports.POOL_BY_CHAIN = POOL_BY_CHAIN;

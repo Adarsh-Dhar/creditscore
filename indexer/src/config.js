@@ -43,8 +43,8 @@ const CHAINS = [
       {
         id: "aave",
         poolAddress: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
-        wethGatewayAddress: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000", // Placeholder - needs actual WETHGateway address
         abi: AAVE_EVENT_ABI,
+        wethGatewayAddress: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x387d311e47e80b498169e6fb51d3193167d89F7D",
         wethGatewayAbi: AAVE_WETHGATEWAY_EVENT_ABI,
       },
       {

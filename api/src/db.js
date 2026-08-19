@@ -1,7 +1,5 @@
 require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
-const { Pool } = require('pg');
 
 // Validate DATABASE_URL is configured
 if (!process.env.DATABASE_URL) {
@@ -15,9 +13,6 @@ if (process.env.DATABASE_URL.includes('user:password') || process.env.DATABASE_U
   console.error('Format: postgresql://username:password@localhost:5432/database_name');
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient();
 
 module.exports = prisma;

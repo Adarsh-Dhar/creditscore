@@ -94,7 +94,7 @@ contract CreditScoreMVP {
     bytes4 constant SEL_AAVE_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
 
     // Aave V3 WETHGateway function selectors — keccak256(signature)[:4]
-    bytes4 constant SEL_AAVE_DEPOSIT_ETH = 0x49f5c3f8;         // depositETH(address,address,uint16)
+    bytes4 constant SEL_AAVE_DEPOSIT_ETH = 0x474cf53d;         // depositETH(address,address,uint16)
     bytes4 constant SEL_AAVE_WITHDRAW_ETH = 0x2e1a7d4d;        // withdrawETH(uint256,address,address)
 
     // Compound Comet function selectors — keccak256(signature)[:4]. These are

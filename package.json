@@ -6,6 +6,8 @@
   "scripts": {
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
+    "redeploy": "hardhat run scripts/redeploy.js --network cc3Testnet",
+    "set-wethgateway": "node scripts/set-wethgateway.js",
     "prove-queue": "node scripts/proveQueue.js",
     "check-score": "node scripts/checkScore.js",
     "check-balances": "node scripts/check-balances.js",

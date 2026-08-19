@@ -157,24 +157,27 @@ export default function Page() {
   // Load weights and chains status once on mount
   useEffect(() => {
     const loadGlobalData = async () => {
-      setLoading(prev => ({ ...prev, weights: true, chains: true }))
+      setLoading(prev => ({ ...prev, weights: true, chains: true, leaderboard: true }))
       try {
-        const [weightsRes, chainsRes] = await Promise.all([
+        const [weightsRes, chainsRes, leaderboardRes] = await Promise.all([
           weights().catch(e => { throw e }),
           chainsStatus().catch(e => { throw e }),
+          leaderboard().catch(e => { throw e }),
         ])
         setWeightsData(weightsRes)
         setChainsData(chainsRes.chains)
-        setErrors(prev => ({ ...prev, weights: null, chains: null }))
+        setLeaderboardData(leaderboardRes.leaderboard)
+        setErrors(prev => ({ ...prev, weights: null, chains: null, leaderboard: null }))
       } catch (e: any) {
         const errorMsg = e instanceof ApiError ? e.message : 'Failed to connect to API'
         setErrors(prev => ({ 
           ...prev, 
           weights: errorMsg,
           chains: errorMsg,
+          leaderboard: errorMsg,
         }))
       } finally {
-        setLoading(prev => ({ ...prev, weights: false, chains: false }))
+        setLoading(prev => ({ ...prev, weights: false, chains: false, leaderboard: false }))
       }
     }
     loadGlobalData()
@@ -213,9 +216,9 @@ export default function Page() {
     }
   }
 
-  // Load leaderboard when that tab is opened
+  // Refresh leaderboard when leaderboard tab is opened
   useEffect(() => {
-    if (activeNav === 'Leaderboard' && leaderboardData.length === 0) {
+    if (activeNav === 'Leaderboard') {
       loadLeaderboard()
     }
   }, [activeNav])

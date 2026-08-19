@@ -135,105 +135,106 @@ async function main() {
             console.log(`Nothing to do for ${protocol} ${type} on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`);
             continue;
           }
-        console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
 
-        let newCount = 0;
-        const blockTimestampCache = new Map(); // Cache block timestamps to avoid redundant calls
+          console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
 
-        try {
-          for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
-            const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
-            process.stdout.write(`  scanning ${start}-${end}... `);
+          let newCount = 0;
+          const blockTimestampCache = new Map(); // Cache block timestamps to avoid redundant calls
 
-            // Get protocol-specific event names
-            const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
-            
-            // For WETHGateway, only include gateway-specific events
-            const eventNamesToIndex = type === 'gateway' 
-              ? protocolEventNames.filter(name => name.includes('ETH'))
-              : protocolEventNames.filter(name => !name.includes('ETH'));
-            
-            // One queryFilter per event type keeps ABI decoding unambiguous and
-            // makes a failure on one event type easy to isolate and retry.
-            for (const eventName of eventNamesToIndex) {
-              let logs;
-              try {
-                logs = await retryWithBackoff(
-                  () => contract.queryFilter(contract.filters[eventName](), start, end),
-                  `${eventName} (${start}-${end})`
-                );
-              } catch (err) {
-                console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
-                console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
-                throw err;
-              }
+          try {
+            for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
+              const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
+              process.stdout.write(`  scanning ${start}-${end}... `);
 
-              // Small delay between event types to avoid rate limiting
-              if (eventNamesToIndex.indexOf(eventName) < eventNamesToIndex.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
-              }
-
-              for (const log of logs) {
-                const key = `${log.transactionHash}:${log.index}`;
-                if (seenKeys.has(key)) continue;
-
-                const parsed = iface.parseLog(log);
-                
-                // Use protocol-specific decoder
-                let wallet, asset, amount;
-                if (protocol === "aave") {
-                  wallet = extractAaveWallet(eventName, parsed.args);
-                  ({ asset, amount } = extractAaveAssetAndAmount(eventName, parsed.args));
-                } else if (protocol === "compound") {
-                  wallet = extractCompoundWallet(eventName, parsed.args);
-                  ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain);
-                  // Classify Compound event based on asset type
-                  eventName = classifyCompoundEvent(eventName, asset, chain);
-                } else if (protocol === "morpho") {
-                  wallet = extractMorphoWallet(eventName, parsed.args);
-                  ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));
-                } else {
-                  console.error(`Unknown protocol: ${protocol}`);
-                  continue;
-                }
-
-                // Map protocol-specific event name to generic event name
-                const genericEventName = EVENT_NAME_MAP[protocol]?.[eventName] || eventName;
-
-                // Get block timestamp (cached per block number)
-                let timestamp;
-                if (blockTimestampCache.has(log.blockNumber)) {
-                  timestamp = blockTimestampCache.get(log.blockNumber);
-                } else {
-                  const block = await retryWithBackoff(
-                    () => provider.getBlock(log.blockNumber),
-                    `getBlock(${log.blockNumber})`
+              // Get protocol-specific event names
+              const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
+              
+              // For WETHGateway, only include gateway-specific events
+              const eventNamesToIndex = type === 'gateway' 
+                ? protocolEventNames.filter(name => name.includes('ETH'))
+                : protocolEventNames.filter(name => !name.includes('ETH'));
+              
+              // One queryFilter per event type keeps ABI decoding unambiguous and
+              // makes a failure on one event type easy to isolate and retry.
+              for (const eventName of eventNamesToIndex) {
+                let logs;
+                try {
+                  logs = await retryWithBackoff(
+                    () => contract.queryFilter(contract.filters[eventName](), start, end),
+                    `${eventName} (${start}-${end})`
                   );
-                  timestamp = block.timestamp;
-                  blockTimestampCache.set(log.blockNumber, timestamp);
+                } catch (err) {
+                  console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
+                  console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
+                  throw err;
                 }
 
-                await saveEvent({
-                  txHash: log.transactionHash,
-                  logIndex: log.index,
-                  blockNumber: log.blockNumber,
-                  eventName: genericEventName,
-                  wallet,
-                  asset,
-                  amount,
-                  chain, // Use the chain name from config
-                  protocol, // Add protocol field
-                  timestamp,
-                  proven: false, // flip to true out-of-band once proof succeeds for this txHash
-                });
-                seenKeys.add(key);
-                newCount++;
-              }
-            }
-            process.stdout.write("done\n");
-          }
+                // Small delay between event types to avoid rate limiting
+                if (eventNamesToIndex.indexOf(eventName) < eventNamesToIndex.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
+                }
 
-          await saveCheckpoint(chain, contractAddress, latestBlock);
+                for (const log of logs) {
+                  const key = `${log.transactionHash}:${log.index}`;
+                  if (seenKeys.has(key)) continue;
+
+                  const parsed = iface.parseLog(log);
+                  
+                  // Use protocol-specific decoder
+                  let wallet, asset, amount;
+                  if (protocol === "aave") {
+                    wallet = extractAaveWallet(eventName, parsed.args);
+                    ({ asset, amount } = extractAaveAssetAndAmount(eventName, parsed.args));
+                  } else if (protocol === "compound") {
+                    wallet = extractCompoundWallet(eventName, parsed.args);
+                    ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain));
+                    // Classify Compound event based on asset type
+                    eventName = classifyCompoundEvent(eventName, asset, chain);
+                  } else if (protocol === "morpho") {
+                    wallet = extractMorphoWallet(eventName, parsed.args);
+                    ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));
+                  } else {
+                    console.error(`Unknown protocol: ${protocol}`);
+                    continue;
+                  }
+
+                  // Map protocol-specific event name to generic event name
+                  const genericEventName = EVENT_NAME_MAP[protocol]?.[eventName] || eventName;
+
+                  // Get block timestamp (cached per block number)
+                  let timestamp;
+                  if (blockTimestampCache.has(log.blockNumber)) {
+                    timestamp = blockTimestampCache.get(log.blockNumber);
+                  } else {
+                    const block = await retryWithBackoff(
+                      () => provider.getBlock(log.blockNumber),
+                      `getBlock(${log.blockNumber})`
+                    );
+                    timestamp = block.timestamp;
+                    blockTimestampCache.set(log.blockNumber, timestamp);
+                  }
+
+                  await saveEvent({
+                    txHash: log.transactionHash,
+                    logIndex: log.index,
+                    blockNumber: log.blockNumber,
+                    eventName: genericEventName,
+                    wallet,
+                    asset,
+                    amount,
+                    chain, // Use the chain name from config
+                    protocol, // Add protocol field
+                    timestamp,
+                    proven: false, // flip to true out-of-band once proof succeeds for this txHash
+                  });
+                  seenKeys.add(key);
+                  newCount++;
+                }
+              }
+              process.stdout.write("done\n");
+            }
+
+            await saveCheckpoint(chain, contractAddress, latestBlock);
 
           console.log(`Indexed ${newCount} new event(s) for ${protocol} ${type} on ${chain}. Checkpoint advanced to block ${latestBlock}.`);
           totalNewCount += newCount;
@@ -241,7 +242,9 @@ async function main() {
           console.error(`Error processing ${protocol} ${type} on ${chain}: ${err.message}`);
           // Continue with other contracts even if one fails
         }
+        }
       }
+    }
 
     console.log(`\n=== Total: ${totalNewCount} new event(s) indexed across all chains ===`);
 
@@ -249,6 +252,8 @@ async function main() {
     const { loadEvents } = require('./store');
     const eventStore = await loadEvents();
     printSummary(eventStore);
+  } catch (err) {
+    console.error(`Fatal error in main: ${err.message}`);
   } finally {
     await disconnect();
   }

@@ -1,12 +1,7 @@
 require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
-const { Pool } = require('pg');
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient();
 
 async function loadCheckpoint(chain, contractAddress) {
   const checkpoint = await prisma.indexerCheckpoint.findUnique({
@@ -63,7 +58,7 @@ async function loadUnprovenEvents(limit = 10, chain = null, protocol = null) {
   if (protocol) {
     where.protocol = protocol;
   }
-  
+
   return await prisma.indexedEvent.findMany({
     where,
     orderBy: [
@@ -93,7 +88,6 @@ async function getSeenKeys() {
 
 async function disconnect() {
   await prisma.$disconnect();
-  await pool.end();
 }
 
 module.exports = {

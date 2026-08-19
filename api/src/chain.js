@@ -19,10 +19,12 @@ let contract;
 
 function getProvider(chain = 'cc3-testnet') {
   if (!providers[chain]) {
+    // Try both underscore and hyphen formats for env var names
     const rpcEnvVar = `${chain.toUpperCase()}_RPC`;
-    const rpcUrl = process.env[rpcEnvVar];
+    const rpcEnvVarAlt = `${chain.toUpperCase().replace('-', '_')}_RPC`;
+    const rpcUrl = process.env[rpcEnvVar] || process.env[rpcEnvVarAlt];
     if (!rpcUrl) {
-      throw new Error(`RPC URL not configured for ${chain}. Set ${rpcEnvVar} in .env`);
+      throw new Error(`RPC URL not configured for ${chain}. Set ${rpcEnvVar} or ${rpcEnvVarAlt} in .env`);
     }
     providers[chain] = new ethers.JsonRpcProvider(rpcUrl);
   }
