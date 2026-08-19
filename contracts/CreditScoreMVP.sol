@@ -48,6 +48,11 @@ contract CreditScoreMVP {
     /// not trusted from the caller. Set by owner via setPoolAddress.
     mapping(uint64 => mapping(uint8 => address)) public poolAddressByChainAndProtocol;
 
+    /// @notice Mapping of chain keys and protocol IDs to WETHGateway addresses for ETH operations.
+    /// Only transactions sent to these addresses are ever credited for ETH deposit/withdraw.
+    /// Set by owner via setWETHGatewayAddress.
+    mapping(uint64 => mapping(uint8 => address)) public wethGatewayByChainAndProtocol;
+
     // Must match the indexer's EVENT_NAMES order exactly:
     // ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"]
     enum EventType {
@@ -87,6 +92,10 @@ contract CreditScoreMVP {
     bytes4 constant SEL_AAVE_SUPPLY_WITH_PERMIT = 0xf5660694;    // supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)
     bytes4 constant SEL_AAVE_REPAY_WITH_PERMIT = 0x5cfc1b2c;     // repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)
     bytes4 constant SEL_AAVE_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
+
+    // Aave V3 WETHGateway function selectors — keccak256(signature)[:4]
+    bytes4 constant SEL_AAVE_DEPOSIT_ETH = 0x49f5c3f8;         // depositETH(address,address,uint16)
+    bytes4 constant SEL_AAVE_WITHDRAW_ETH = 0x2e1a7d4d;        // withdrawETH(uint256,address,address)
 
     // Compound Comet function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Compound; anything else reverts.
@@ -167,15 +176,33 @@ contract CreditScoreMVP {
         poolAddressByChainAndProtocol[chainKey][protocolId] = pool;
     }
 
+    /// @notice Set the WETHGateway address for a specific chain and protocol
+    /// @param chainKey Chain identifier
+    /// @param protocolId Protocol identifier (currently only Aave uses WETHGateway)
+    /// @param gateway WETHGateway address for this chain and protocol
+    function setWETHGatewayAddress(uint64 chainKey, uint8 protocolId, address gateway) external onlyOwner {
+        require(gateway != address(0), "Gateway address cannot be zero");
+        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        wethGatewayByChainAndProtocol[chainKey][protocolId] = gateway;
+    }
+
     /// @notice Derives the EventType from the verified transaction's own
     /// calldata — never from a caller-supplied parameter. Also enforces that
-    /// the transaction actually targeted the Pool for the given chain and protocol. This is what makes
+    /// the transaction actually targeted the Pool or WETHGateway for the given chain and protocol. This is what makes
     /// the credited event type as trustless as the "it happened" fact is.
     function _decodeEventType(bytes memory encodedTx, uint64 chainKey, uint8 protocolId) internal view returns (EventType) {
         EvmV1Decoder.CommonTxFields memory common = EvmV1Decoder.decodeCommonTxFields(encodedTx);
 
         require(!common.toIsNull, "tx has no recipient");
-        require(common.to == poolAddressByChainAndProtocol[chainKey][protocolId], "not a Pool transaction for this chain and protocol");
+        
+        // Check if transaction targets either Pool or WETHGateway (for Aave)
+        address poolAddress = poolAddressByChainAndProtocol[chainKey][protocolId];
+        address gatewayAddress = wethGatewayByChainAndProtocol[chainKey][protocolId];
+        
+        bool isPoolTx = common.to == poolAddress;
+        bool isGatewayTx = common.to == gatewayAddress;
+        
+        require(isPoolTx || isGatewayTx, "not a Pool or Gateway transaction for this chain and protocol");
         require(common.data.length >= 4, "calldata too short to contain a selector");
 
         bytes4 selector;
@@ -186,7 +213,7 @@ contract CreditScoreMVP {
 
         // Protocol-specific selector decoding
         if (protocolId == uint8(ProtocolId.Aave)) {
-            return _decodeAaveEventType(selector);
+            return _decodeAaveEventType(selector, isGatewayTx);
         } else if (protocolId == uint8(ProtocolId.Compound)) {
             return _decodeCompoundEventType(selector);
         } else if (protocolId == uint8(ProtocolId.Morpho)) {
@@ -197,7 +224,15 @@ contract CreditScoreMVP {
     }
 
     /// @notice Decode Aave event type from function selector
-    function _decodeAaveEventType(bytes4 selector) internal pure returns (EventType) {
+    function _decodeAaveEventType(bytes4 selector, bool isGatewayTx) internal pure returns (EventType) {
+        if (isGatewayTx) {
+            // WETHGateway selectors
+            if (selector == SEL_AAVE_DEPOSIT_ETH) return EventType.Supply;
+            if (selector == SEL_AAVE_WITHDRAW_ETH) return EventType.Withdraw;
+            revert("unrecognized WETHGateway selector");
+        }
+        
+        // Pool selectors
         if (selector == SEL_AAVE_SUPPLY) return EventType.Supply;
         if (selector == SEL_AAVE_BORROW) return EventType.Borrow;
         if (selector == SEL_AAVE_REPAY) return EventType.Repay;

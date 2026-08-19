@@ -4,9 +4,11 @@ function extractWallet(eventName, args) {
   switch (eventName) {
     case "Supply":
     case "Borrow":
+    case "DepositETH":
       return args.onBehalfOf;
     case "Repay":
     case "Withdraw":
+    case "WithdrawETH":
     case "LiquidationCall":
       return args.user;
     default:
@@ -23,6 +25,9 @@ function extractAssetAndAmount(eventName, args) {
       return { asset: args.reserve, amount: args.amount.toString() };
     case "LiquidationCall":
       return { asset: args.debtAsset, amount: args.debtToCover.toString() };
+    case "DepositETH":
+    case "WithdrawETH":
+      return { asset: args.reserve, amount: args.amount.toString() };
     default:
       return { asset: null, amount: null };
   }

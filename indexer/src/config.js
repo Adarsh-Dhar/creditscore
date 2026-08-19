@@ -7,6 +7,12 @@ const AAVE_EVENT_ABI = [
   "event LiquidationCall(address indexed collateralAsset, address indexed debtAsset, address indexed user, uint256 debtToCover, uint256 liquidatedCollateralAmount, address liquidator, bool receiveAToken)",
 ];
 
+// Aave V3 WETHGateway events — taken from Aave's WETHGateway ABI
+const AAVE_WETHGATEWAY_EVENT_ABI = [
+  "event DepositETH(address indexed reserve, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
+  "event WithdrawETH(address indexed reserve, address indexed to, uint256 amount)",
+];
+
 // Compound Comet events — taken from Compound Comet ABI
 // Note: Comet only has Supply/Withdraw/Absorb events. Borrow/Repay are tracked via asset type
 const COMPOUND_EVENT_ABI = [
@@ -37,7 +43,9 @@ const CHAINS = [
       {
         id: "aave",
         poolAddress: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+        wethGatewayAddress: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000", // Placeholder - needs actual WETHGateway address
         abi: AAVE_EVENT_ABI,
+        wethGatewayAbi: AAVE_WETHGATEWAY_EVENT_ABI,
       },
       {
         id: "compound",
@@ -83,6 +91,8 @@ const EVENT_NAME_MAP = {
     "Repay": "Repay",
     "Withdraw": "Withdraw",
     "LiquidationCall": "LiquidationCall",
+    "DepositETH": "Supply",
+    "WithdrawETH": "Withdraw",
   },
   compound: {
     "Supply": "Supply", // Will be classified as Supply or Repay based on asset type
@@ -113,6 +123,7 @@ const EVENT_NAMES = GENERIC_EVENT_NAMES;
 module.exports = { 
   CHAINS, 
   AAVE_EVENT_ABI, 
+  AAVE_WETHGATEWAY_EVENT_ABI,
   COMPOUND_EVENT_ABI, 
   MORPHO_EVENT_ABI, 
   POOL_EVENT_ABI, 

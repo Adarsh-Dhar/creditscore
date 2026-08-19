@@ -38,6 +38,13 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
   },
 };
 
+// WETHGateway addresses by chain and protocol for validation
+const WETHGATEWAY_BY_CHAIN_AND_PROTOCOL = {
+  sepolia: {
+    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000",
+  },
+};
+
 // Protocol ID mappings
 const PROTOCOL_IDS = {
   aave: 0,
@@ -189,6 +196,7 @@ function flattenBatchProofData(proofData) {
 async function submitBatchProof({
   events,
   chainKey,
+  protocolId,
   proofData,
   cc3TestnetRpc,
   privateKey,
@@ -297,8 +305,10 @@ async function processBatch(events, config) {
     // Resolve chainKey
     const chainKey = await resolveChainKey(chain, creditcoinProvider, log);
 
-    // Validate all transactions target the Pool for this chain and protocol
+    // Validate all transactions target the Pool or Gateway for this chain and protocol
     const poolAddress = POOL_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
+    const gatewayAddress = WETHGATEWAY_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
+    
     if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
       throw new BatchProofError(`No pool address configured for chain ${chain} and protocol ${protocol}`);
     }
@@ -316,12 +326,16 @@ async function processBatch(events, config) {
           throw new BatchProofError(`Transaction not found: ${event.txHash}`);
         }
 
-        if (!tx.to || tx.to.toLowerCase() !== poolAddress.toLowerCase()) {
+        // Check if transaction targets either Pool or WETHGateway (for Aave)
+        const isPoolTx = tx.to && tx.to.toLowerCase() === poolAddress.toLowerCase();
+        const isGatewayTx = gatewayAddress && tx.to && tx.to.toLowerCase() === gatewayAddress.toLowerCase();
+        
+        if (!isPoolTx && !isGatewayTx) {
           throw new BatchProofError(
-            `${event.txHash} was not sent to the Pool contract (expected ${poolAddress}, got ${tx.to})`
+            `${event.txHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to})`
           );
         }
-        log(`  ✓ ${event.txHash.substring(0, 10)}... valid Pool transaction`);
+        log(`  ✓ ${event.txHash.substring(0, 10)}... valid Pool/Gateway transaction`);
       } catch (error) {
         log(`  ✗ ${event.txHash.substring(0, 10)}... validation failed: ${error.message}`);
         throw error;
@@ -369,6 +383,7 @@ async function processBatch(events, config) {
     const result = await submitBatchProof({
       events,
       chainKey,
+      protocolId,
       proofData,
       cc3TestnetRpc,
       privateKey,
@@ -407,10 +422,17 @@ module.exports = {
   processBatch,
   CHAIN_IDS,
   POOL_BY_CHAIN_AND_PROTOCOL,
-  POOL_BY_CHAIN,
+  WETHGATEWAY_BY_CHAIN_AND_PROTOCOL,
   PROTOCOL_IDS,
   BatchProofError,
   ChainResolutionError,
   ProofGenerationError,
   ContractSubmissionError,
 };
+
+// Backward compatibility: create POOL_BY_CHAIN from POOL_BY_CHAIN_AND_PROTOCOL
+const POOL_BY_CHAIN = {};
+for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
+  POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
+}
+module.exports.POOL_BY_CHAIN = POOL_BY_CHAIN;

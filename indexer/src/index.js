@@ -14,7 +14,7 @@
 
 require("dotenv").config();
 const { JsonRpcProvider, Contract, Interface } = require("ethers");
-const { CHAINS, AAVE_EVENT_ABI, COMPOUND_EVENT_ABI, MORPHO_EVENT_ABI, EVENT_NAME_MAP, GENERIC_EVENT_NAMES, CHUNK_SIZE } = require("./config");
+const { CHAINS, AAVE_EVENT_ABI, AAVE_WETHGATEWAY_EVENT_ABI, COMPOUND_EVENT_ABI, MORPHO_EVENT_ABI, EVENT_NAME_MAP, GENERIC_EVENT_NAMES, CHUNK_SIZE } = require("./config");
 const { extractWallet: extractAaveWallet, extractAssetAndAmount: extractAaveAssetAndAmount } = require("./aaveDecoder");
 const { extractWallet: extractCompoundWallet, extractAssetAndAmount: extractCompoundAssetAndAmount, classifyCompoundEvent } = require("./compoundDecoder");
 const { extractWallet: extractMorphoWallet, extractAssetAndAmount: extractMorphoAssetAndAmount } = require("./morphoDecoder");
@@ -87,7 +87,7 @@ async function main() {
 
       // Process each protocol within the chain
       for (const protocolConfig of protocols) {
-        const { id: protocol, poolAddress: contractAddress, abi } = protocolConfig;
+        const { id: protocol, poolAddress: contractAddress, abi, wethGatewayAddress, wethGatewayAbi } = protocolConfig;
         
         if (!contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
           console.log(`Skipping ${protocol} on ${chain}: pool address not configured`);
@@ -95,25 +95,46 @@ async function main() {
         }
 
         console.log(`Processing protocol: ${protocol} (${contractAddress})`);
-        const iface = new Interface(abi);
-        const contract = new Contract(contractAddress, abi, provider);
-
-        const checkpoint = await loadCheckpoint(chain, contractAddress);
-
-        const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
-        const fromBlock = resolveFromBlock({
-          cliFromBlock: cli.fromBlock,
-          checkpointBlock: checkpoint.lastIndexedBlock,
-          startBlockEnv: process.env[`START_BLOCK_${chain.toUpperCase()}`],
-          latestBlock,
+        
+        // For Aave, also process WETHGateway if configured
+        const contractsToIndex = [];
+        
+        contractsToIndex.push({
+          type: 'pool',
+          address: contractAddress,
+          abi: abi,
         });
-
-        if (fromBlock > latestBlock) {
-          console.log(`Nothing to do for ${protocol} on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`);
-          continue;
+        
+        if (protocol === 'aave' && wethGatewayAddress && wethGatewayAddress !== "0x0000000000000000000000000000000000000000") {
+          contractsToIndex.push({
+            type: 'gateway',
+            address: wethGatewayAddress,
+            abi: wethGatewayAbi,
+          });
+          console.log(`Also indexing WETHGateway: ${wethGatewayAddress}`);
         }
 
-        console.log(`Indexing ${protocol} pool ${contractAddress} on ${chain}`);
+        for (const contractConfig of contractsToIndex) {
+          const { type, address: contractAddress, abi: contractAbi } = contractConfig;
+          
+          console.log(`Indexing ${protocol} ${type} ${contractAddress} on ${chain}`);
+          const iface = new Interface(contractAbi);
+          const contract = new Contract(contractAddress, contractAbi, provider);
+
+          const checkpoint = await loadCheckpoint(chain, contractAddress);
+
+          const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
+          const fromBlock = resolveFromBlock({
+            cliFromBlock: cli.fromBlock,
+            checkpointBlock: checkpoint.lastIndexedBlock,
+            startBlockEnv: process.env[`START_BLOCK_${chain.toUpperCase()}`],
+            latestBlock,
+          });
+
+          if (fromBlock > latestBlock) {
+            console.log(`Nothing to do for ${protocol} ${type} on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`);
+            continue;
+          }
         console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
 
         let newCount = 0;
@@ -127,9 +148,14 @@ async function main() {
             // Get protocol-specific event names
             const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
             
+            // For WETHGateway, only include gateway-specific events
+            const eventNamesToIndex = type === 'gateway' 
+              ? protocolEventNames.filter(name => name.includes('ETH'))
+              : protocolEventNames.filter(name => !name.includes('ETH'));
+            
             // One queryFilter per event type keeps ABI decoding unambiguous and
             // makes a failure on one event type easy to isolate and retry.
-            for (const eventName of protocolEventNames) {
+            for (const eventName of eventNamesToIndex) {
               let logs;
               try {
                 logs = await retryWithBackoff(
@@ -143,7 +169,7 @@ async function main() {
               }
 
               // Small delay between event types to avoid rate limiting
-              if (protocolEventNames.indexOf(eventName) < protocolEventNames.length - 1) {
+              if (eventNamesToIndex.indexOf(eventName) < eventNamesToIndex.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
               }
 
@@ -209,11 +235,11 @@ async function main() {
 
           await saveCheckpoint(chain, contractAddress, latestBlock);
 
-          console.log(`Indexed ${newCount} new event(s) for ${protocol} on ${chain}. Checkpoint advanced to block ${latestBlock}.`);
+          console.log(`Indexed ${newCount} new event(s) for ${protocol} ${type} on ${chain}. Checkpoint advanced to block ${latestBlock}.`);
           totalNewCount += newCount;
         } catch (err) {
-          console.error(`Error processing ${protocol} on ${chain}: ${err.message}`);
-          // Continue with other protocols even if one fails
+          console.error(`Error processing ${protocol} ${type} on ${chain}: ${err.message}`);
+          // Continue with other contracts even if one fails
         }
       }
 

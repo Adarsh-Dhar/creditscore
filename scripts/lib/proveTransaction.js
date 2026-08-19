@@ -46,6 +46,13 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
   },
 };
 
+// WETHGateway addresses by chain and protocol for validation
+const WETHGATEWAY_BY_CHAIN_AND_PROTOCOL = {
+  sepolia: {
+    aave: process.env.AAVE_SEPOLIA_WETHGATEWAY || "0x0000000000000000000000000000000000000000",
+  },
+};
+
 // Protocol ID mappings
 const PROTOCOL_IDS = {
   aave: 0,
@@ -115,8 +122,10 @@ async function proveTransaction({
   }
   const chainKey = chainEntry.chainKey;
 
-  // --- Step 2: locate the transaction's block, guard it's a Pool tx ---
+  // --- Step 2: locate the transaction's block, guard it's a Pool or Gateway tx ---
   const poolAddress = POOL_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
+  const gatewayAddress = WETHGATEWAY_BY_CHAIN_AND_PROTOCOL[chain]?.[protocol];
+  
   if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
     throw new Error(`No pool address configured for chain ${chain} and protocol ${protocol}`);
   }
@@ -130,9 +139,13 @@ async function proveTransaction({
   if (!tx) throw new Error(`Transaction not found on ${chain}: ${sourceTxHash}`);
   const blockNumber = tx.blockNumber;
 
-  if (!tx.to || tx.to.toLowerCase() !== poolAddress.toLowerCase()) {
+  // Check if transaction targets either Pool or WETHGateway (for Aave)
+  const isPoolTx = tx.to && tx.to.toLowerCase() === poolAddress.toLowerCase();
+  const isGatewayTx = gatewayAddress && tx.to && tx.to.toLowerCase() === gatewayAddress.toLowerCase();
+  
+  if (!isPoolTx && !isGatewayTx) {
     throw new Error(
-      `${sourceTxHash} was not sent to the Pool contract (expected ${poolAddress}, got ${tx.to}). Refusing to prove/score a non-Pool transaction.` 
+      `${sourceTxHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to}). Refusing to prove/score a non-Pool transaction.` 
     );
   }
 
@@ -202,4 +215,4 @@ for (const [chain, protocols] of Object.entries(POOL_BY_CHAIN_AND_PROTOCOL)) {
   POOL_BY_CHAIN[chain] = protocols.aave; // Default to Aave for backward compatibility
 }
 
-module.exports = { proveTransaction, POOL_BY_CHAIN_AND_PROTOCOL, POOL_BY_CHAIN, PROTOCOL_IDS, CHAIN_IDS, CONTRACT_ABI };
+module.exports = { proveTransaction, POOL_BY_CHAIN_AND_PROTOCOL, WETHGATEWAY_BY_CHAIN_AND_PROTOCOL, POOL_BY_CHAIN, PROTOCOL_IDS, CHAIN_IDS, CONTRACT_ABI };
