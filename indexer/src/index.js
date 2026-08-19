@@ -115,13 +115,13 @@ async function main() {
         }
 
         for (const contractConfig of contractsToIndex) {
-          const { type, address: contractAddress, abi: contractAbi } = contractConfig;
-          
-          console.log(`Indexing ${protocol} ${type} ${contractAddress} on ${chain}`);
-          const iface = new Interface(contractAbi);
-          const contract = new Contract(contractAddress, contractAbi, provider);
+          const { type, address: contractAddr, abi: contractAbi } = contractConfig;
 
-          const checkpoint = await loadCheckpoint(chain, contractAddress);
+          console.log(`Indexing ${protocol} ${type} ${contractAddr} on ${chain}`);
+          const iface = new Interface(contractAbi);
+          const contract = new Contract(contractAddr, contractAbi, provider);
+
+          const checkpoint = await loadCheckpoint(chain, contractAddr);
 
           const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
           const fromBlock = resolveFromBlock({
@@ -156,7 +156,7 @@ async function main() {
               
               // One queryFilter per event type keeps ABI decoding unambiguous and
               // makes a failure on one event type easy to isolate and retry.
-              for (const eventName of eventNamesToIndex) {
+              for (let eventName of eventNamesToIndex) {
                 let logs;
                 try {
                   logs = await retryWithBackoff(
@@ -189,7 +189,9 @@ async function main() {
                     wallet = extractCompoundWallet(eventName, parsed.args);
                     ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain));
                     // Classify Compound event based on asset type
-                    eventName = classifyCompoundEvent(eventName, asset, chain);
+                    const classifiedEventName = classifyCompoundEvent(eventName, asset, chain);
+                    // Use the classified event name for further processing
+                    eventName = classifiedEventName;
                   } else if (protocol === "morpho") {
                     wallet = extractMorphoWallet(eventName, parsed.args);
                     ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));

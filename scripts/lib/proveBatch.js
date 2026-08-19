@@ -30,7 +30,7 @@ const BATCH_CONTRACT_ABI = [
 const POOL_BY_CHAIN_AND_PROTOCOL = {
   sepolia: {
     aave: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
-    compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+    compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e",
     morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
   },
   "cc3-testnet": {
@@ -326,16 +326,28 @@ async function processBatch(events, config) {
           throw new BatchProofError(`Transaction not found: ${event.txHash}`);
         }
 
-        // Check if transaction targets either Pool or WETHGateway (for Aave)
+        // Check if transaction targets the protocol contract
+        // For Aave, it can target either Pool or WETHGateway
+        // For Compound and Morpho, it targets the pool directly
         const isPoolTx = tx.to && tx.to.toLowerCase() === poolAddress.toLowerCase();
         const isGatewayTx = gatewayAddress && tx.to && tx.to.toLowerCase() === gatewayAddress.toLowerCase();
-        
-        if (!isPoolTx && !isGatewayTx) {
-          throw new BatchProofError(
-            `${event.txHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to})`
-          );
+
+        // Aave requires either Pool or Gateway, others only need Pool
+        if (protocol === 'aave') {
+          if (!isPoolTx && !isGatewayTx) {
+            throw new BatchProofError(
+              `${event.txHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to})`
+            );
+          }
+        } else {
+          // For non-Aave protocols, only check pool address
+          if (!isPoolTx) {
+            throw new BatchProofError(
+              `${event.txHash} was not sent to the ${protocol} contract (expected ${poolAddress}, got ${tx.to})`
+            );
+          }
         }
-        log(`  ✓ ${event.txHash.substring(0, 10)}... valid Pool/Gateway transaction`);
+        log(`  ✓ ${event.txHash.substring(0, 10)}... valid ${protocol} transaction`);
       } catch (error) {
         log(`  ✗ ${event.txHash.substring(0, 10)}... validation failed: ${error.message}`);
         throw error;

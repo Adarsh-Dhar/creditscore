@@ -49,7 +49,7 @@ const CHAINS = [
       },
       {
         id: "compound",
-        poolAddress: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+        poolAddress: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e",
         abi: COMPOUND_EVENT_ABI,
       },
       {

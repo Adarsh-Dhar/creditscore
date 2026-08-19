@@ -7,8 +7,8 @@
 // - Absorb = LiquidationCall
 
 // This needs to be configured per-chain since base asset addresses differ
-const COMET_BASE_ASSETS = {
-  sepolia: "0x7b79995e5f793A07Bc00c21412e50Ecae498dF6F", // USDC on Sepolia Comet
+let COMET_BASE_ASSETS = {
+  sepolia: "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e", // USDC on Sepolia Comet (actual base asset)
   // Add other chains as needed
 };
 
