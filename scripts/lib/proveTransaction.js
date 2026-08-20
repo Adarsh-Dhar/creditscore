@@ -39,7 +39,7 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
   sepolia: {
     aave: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
     compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e",
-    morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
+    morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
   },
   "cc3-testnet": {
     aave: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment

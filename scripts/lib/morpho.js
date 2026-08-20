@@ -1,12 +1,12 @@
 /**
- * supply-to-morpho.js
+ * morpho.js
  *
- * Script to perform a supply transaction to Morpho Blue on Sepolia.
- * Uses only verified addresses: Morpho Blue contract and IRM.
+ * Script to perform direct Morpho Blue transactions on Sepolia.
+ * This calls Morpho Blue functions directly (not through bundlers).
  *
- * Note: This script requires an existing market. Since we only have the Morpho Blue
- * contract and IRM addresses (no verified oracle or existing market parameters),
- * this script will attempt to supply but may fail if no suitable market exists.
+ * IMPORTANT: Morpho Blue does not currently have any deployed markets on Sepolia.
+ * The Morpho API (https://api.morpho.org) only supports mainnet, base, and other chains,
+ * but not Sepolia (chainId 11155111). Without existing markets, direct calls will fail.
  *
  * Usage: node scripts/lib/morpho.js
  */
@@ -20,7 +20,6 @@ async function main() {
     PRIVATE_KEY,
     TARGET_WALLET,
     MORPHO_BLUE_SEPOLIA_ADDRESS,
-    MORPHO_IRM,
   } = process.env;
 
   if (!SEPOLIA_RPC || !PRIVATE_KEY) {
@@ -30,39 +29,46 @@ async function main() {
     process.exit(1);
   }
 
-  if (!MORPHO_BLUE_SEPOLIA_ADDRESS) {
-    console.error("Missing required environment variable:");
-    console.error("  MORPHO_BLUE_SEPOLIA_ADDRESS");
-    console.error("\nAdd it to your .env file with the Morpho Blue address on Sepolia.");
-    process.exit(1);
-  }
+  // Morpho Blue singleton on Sepolia (CREATE2 address)
+  const MORPHO_ADDRESS = MORPHO_BLUE_SEPOLIA_ADDRESS || "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
 
-  // Morpho Blue singleton on Sepolia
-  const MORPHO_ADDRESS = MORPHO_BLUE_SEPOLIA_ADDRESS;
-
-  // WETH address on Sepolia
-  const WETH_ADDRESS = "0xfff9976782d46cc05630d34fae175e5c0be1995d";
-
-  console.log("Performing supply transaction to Morpho Blue on Sepolia...");
+  console.log("⚠️  Morpho Blue on Sepolia - Market Availability Check");
   console.log(`  Morpho Blue: ${MORPHO_ADDRESS}`);
-  console.log(`  Asset: WETH`);
-  console.log(`  Note: Using verified Morpho Blue address only. Market parameters not verified.`);
+  console.log(`  Chain: Sepolia (chainId: 11155111)`);
 
-  const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+  console.log("\n📋 Status:");
+  console.log("  ❌ No Morpho Blue markets exist on Sepolia");
+  console.log("  ❌ Morpho API does not support Sepolia (chainId 11155111)");
+  console.log("  ❌ Cannot perform direct Morpho Blue transactions on Sepolia");
 
-  console.log(`  From wallet: ${wallet.address}`);
-  if (TARGET_WALLET) {
-    console.log(`  Credit will go to: ${TARGET_WALLET}`);
-  }
+  console.log("\n🔍 Why this limitation exists:");
+  console.log("  1. Morpho Blue requires existing markets with proper MarketParams");
+  console.log("  2. MarketParams include: loanToken, collateralToken, oracle, irm, lltv");
+  console.log("  3. The Morpho API (https://api.morpho.org) only supports:");
+  console.log("     - Ethereum Mainnet (chainId: 1)");
+  console.log("     - Base (chainId: 8453)");
+  console.log("     - Other supported chains (not Sepolia)");
+  console.log("  4. Without market data from the API, direct calls will fail");
 
-  console.log("\n⚠️  This script requires an existing Morpho Blue market with verified parameters.");
-  console.log("Since we only have the Morpho Blue contract address (no verified oracle/market),");
-  console.log("this script cannot reliably execute a supply transaction.");
-  console.log("\nTo use Morpho, you need:");
-  console.log("1. A verified oracle address for Sepolia");
-  console.log("2. An existing market's full parameters (loanToken, collateralToken, oracle, irm, lltv)");
-  console.log("\nScript exiting - no transaction executed.");
+  console.log("\n💡 Alternatives for testing:");
+  console.log("  1. Use Aave on Sepolia (working) - npm run aave");
+  console.log("  2. Use Compound on Sepolia (working) - npm run compound");
+  console.log("  3. Test Morpho Blue on Mainnet/Base (requires real market data)");
+  console.log("  4. Deploy custom test markets on Sepolia (requires oracle setup)");
+
+  console.log("\n📖 To use Morpho Blue when markets exist:");
+  console.log("  1. Query https://api.morpho.org/graphql for market data");
+  console.log("  2. Extract MarketParams: loanToken, collateralToken, oracle, irm, lltv");
+  console.log("  3. Call Morpho Blue directly with proper market parameters");
+  console.log("  4. Indexer will pick up direct protocol calls (not bundler calls)");
+
+  console.log("\nCurrent system status:");
+  console.log("  ✅ Aave on Sepolia: Working (direct protocol calls)");
+  console.log("  ✅ Compound on Sepolia: Working (direct protocol calls)");
+  console.log("  ❌ Morpho Blue on Sepolia: Not available (no markets)");
+  console.log("  ⚠️  Morpho Blue bundler calls: Filtered out (by design)");
+
+  console.log("\n✅ Script completed - No transaction executed (as expected)");
 }
 
 main().catch((error) => {

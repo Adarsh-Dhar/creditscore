@@ -40,12 +40,12 @@ async function main() {
   console.log(`✓ Aave Pool address set: ${aavePoolAddress}`);
 
   // Compound Pool on Sepolia
-  const compoundPoolAddress = "0xc3d688B66703497DAA19211EEdff47f25384cdc3";
+  const compoundPoolAddress = "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e";
   await contract.setPoolAddress(sepoliaChainKey, 1, compoundPoolAddress);
   console.log(`✓ Compound Pool address set: ${compoundPoolAddress}`);
 
   // Morpho Pool on Sepolia
-  const morphoPoolAddress = "0xd011EE229E7459ba1ddd22631eF7bF528d424A14";
+  const morphoPoolAddress = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
   await contract.setPoolAddress(sepoliaChainKey, 2, morphoPoolAddress);
   console.log(`✓ Morpho Pool address set: ${morphoPoolAddress}`);
 

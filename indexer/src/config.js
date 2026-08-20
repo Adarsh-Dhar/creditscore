@@ -52,11 +52,12 @@ const CHAINS = [
         poolAddress: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e",
         abi: COMPOUND_EVENT_ABI,
       },
-      {
-        id: "morpho",
-        poolAddress: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
-        abi: MORPHO_EVENT_ABI,
-      },
+      // Morpho Blue disabled on Sepolia - no markets exist on Sepolia chain
+      // {
+      //   id: "morpho",
+      //   poolAddress: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
+      //   abi: MORPHO_EVENT_ABI,
+      // },
     ],
   },
   {
