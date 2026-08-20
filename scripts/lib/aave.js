@@ -18,7 +18,7 @@ require("dotenv").config();
 const { ethers } = require("ethers");
 
 async function main() {
-  const { SEPOLIA_RPC, PRIVATE_KEY, TARGET_WALLET, AAVE_SEPOLIA_POOL, AAVE_SEPOLIA_USDC } = process.env;
+  const { SEPOLIA_RPC, PRIVATE_KEY, AAVE_SEPOLIA_POOL, AAVE_SEPOLIA_USDC } = process.env;
 
   if (!SEPOLIA_RPC || !PRIVATE_KEY) {
     console.error("Missing required environment variables:");
@@ -72,9 +72,6 @@ async function main() {
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
   console.log(`  From wallet: ${wallet.address}`);
-  if (TARGET_WALLET) {
-    console.log(`  Credit will go to: ${TARGET_WALLET}`);
-  }
 
   console.log("\n✅ Aave script is properly configured and ready to execute.");
   console.log("Note: Ensure you have sufficient token balances before actual execution.");
@@ -110,11 +107,11 @@ async function main() {
 
       const wethGateway = new ethers.Contract(
         AAVE_WETHGATEWAY,
-        ["function depositETH(address onBehalfOf, address pool, uint16 referralCode) payable"],
+        ["function depositETH(address, address onBehalfOf, uint16 referralCode) payable"],
         wallet
       );
 
-      supplyTx = await wethGateway.depositETH(wallet.address, AAVE_POOL_ADDRESS, 0, { value: SUPPLY_AMOUNT });
+      supplyTx = await wethGateway.depositETH(ethers.ZeroAddress, wallet.address, 0, { value: SUPPLY_AMOUNT });
       console.log(`  Deposit transaction: ${supplyTx.hash}`);
       console.log("  Waiting for confirmation...");
 

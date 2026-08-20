@@ -12,7 +12,8 @@
  *   npm run index -- --from-block 1234567    # override checkpoint, re-scan from this block
  */
 
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
 const { JsonRpcProvider, Contract, Interface } = require("ethers");
 const { CHAINS, AAVE_EVENT_ABI, AAVE_WETHGATEWAY_EVENT_ABI, COMPOUND_EVENT_ABI, MORPHO_EVENT_ABI, EVENT_NAME_MAP, GENERIC_EVENT_NAMES, CHUNK_SIZE } = require("./config");
 const { extractWallet: extractAaveWallet, extractAssetAndAmount: extractAaveAssetAndAmount } = require("./aaveDecoder");
@@ -188,14 +189,19 @@ async function main() {
                     `getTransaction(${log.transactionHash})`
                   );
                   
-                  const targetAddress = contractAddr;
-                  
-                  if (tx.to.toLowerCase() !== targetAddress.toLowerCase()) {
-                    console.log(`  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to} ≠ ${targetAddress})`);
+                  // Build valid targets for this protocol
+                  // For Aave, accept both Pool and WETHGateway as valid entrypoints
+                  // For other protocols, only accept the direct contract address
+                  const validTargetsForProtocol = protocol === 'aave' && wethGatewayAddress && wethGatewayAddress !== "0x0000000000000000000000000000000000000000"
+                    ? [contractAddr, wethGatewayAddress].map(a => a.toLowerCase())
+                    : [contractAddr.toLowerCase()];
+
+                  if (!validTargetsForProtocol.includes(tx.to.toLowerCase())) {
+                    console.log(`  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to}, expected one of: ${validTargetsForProtocol.join(", ")})`);
                     continue;
                   }
                   
-                  // Use protocol-specific decoder
+                  // Extract wallet, asset, and amount from event
                   let wallet, asset, amount;
                   if (protocol === "aave") {
                     wallet = extractAaveWallet(eventName, parsed.args);

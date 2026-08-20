@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { PrismaClient } = require('@prisma/client');
 
 // Validate DATABASE_URL is configured
@@ -9,7 +10,7 @@ if (!process.env.DATABASE_URL) {
 // Check if using placeholder credentials
 if (process.env.DATABASE_URL.includes('user:password') || process.env.DATABASE_URL.includes('user:password@localhost')) {
   console.error('⚠️  WARNING: Using placeholder database credentials');
-  console.error('Please configure your actual PostgreSQL credentials in api/.env');
+  console.error('Please configure your actual PostgreSQL credentials in .env');
   console.error('Format: postgresql://username:password@localhost:5432/database_name');
 }
 
