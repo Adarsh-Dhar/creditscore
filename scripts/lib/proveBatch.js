@@ -219,23 +219,22 @@ async function submitBatchProof({
     const txHashKeys = events.map((e) => keccak256(toUtf8Bytes(e.txHash)));
 
     // Convert merkle proofs to contract format - array of tuples [root, siblings]
+    // Ethers v6 requires unnamed tuple params to be arrays, not objects
     const contractMerkleProofs = merkleProofs.map((proof) => {
       const siblingsArray = proof.siblings.map((sibling) => [sibling.hash, sibling.isLeft]);
-      return {
-        root: proof.root,
-        siblings: siblingsArray,
-      };
+      return [proof.root, siblingsArray];
     });
 
     log(`  merkle proofs count: ${contractMerkleProofs.length}`);
-    log(`  first merkle proof root: ${contractMerkleProofs[0].root}`);
-    log(`  first merkle proof siblings: ${contractMerkleProofs[0].siblings.length}`);
+    log(`  first merkle proof root: ${contractMerkleProofs[0][0]}`);
+    log(`  first merkle proof siblings: ${contractMerkleProofs[0][1].length}`);
 
     // Convert continuity proof to contract format - tuple [lowerEndpointDigest, roots]
-    const contractContinuityProof = {
-      lowerEndpointDigest: proofData.continuityProof.lowerEndpointDigest,
-      roots: proofData.continuityProof.roots,
-    };
+    // Ethers v6 requires unnamed tuple params to be arrays, not objects
+    const contractContinuityProof = [
+      proofData.continuityProof.lowerEndpointDigest,
+      proofData.continuityProof.roots,
+    ];
 
     log(`  submitting batch proof to contract...`);
     log(`  contract address: ${contractAddress}`);
@@ -333,20 +332,25 @@ async function processBatch(events, config) {
         const isGatewayTx = gatewayAddress && tx.to && tx.to.toLowerCase() === gatewayAddress.toLowerCase();
 
         // Aave requires either Pool or Gateway, others only need Pool
+        let isValidProtocolTx = false;
         if (protocol === 'aave') {
-          if (!isPoolTx && !isGatewayTx) {
+          isValidProtocolTx = isPoolTx || isGatewayTx;
+        } else {
+          isValidProtocolTx = isPoolTx;
+        }
+
+        if (!isValidProtocolTx) {
+          if (protocol === 'aave') {
             throw new BatchProofError(
               `${event.txHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to})`
             );
-          }
-        } else {
-          // For non-Aave protocols, only check pool address
-          if (!isPoolTx) {
+          } else {
             throw new BatchProofError(
               `${event.txHash} was not sent to the ${protocol} contract (expected ${poolAddress}, got ${tx.to})`
             );
           }
         }
+        
         log(`  ✓ ${event.txHash.substring(0, 10)}... valid ${protocol} transaction`);
       } catch (error) {
         log(`  ✗ ${event.txHash.substring(0, 10)}... validation failed: ${error.message}`);

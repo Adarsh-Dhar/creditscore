@@ -180,6 +180,21 @@ async function main() {
 
                   const parsed = iface.parseLog(log);
                   
+                  // CRITICAL: Validate that transaction targets the protocol contract directly
+                  // This prevents relayed/gas-station transactions from being added to the queue
+                  // since the contract requires direct protocol calls for trustless decoding
+                  const tx = await retryWithBackoff(
+                    () => provider.getTransaction(log.transactionHash),
+                    `getTransaction(${log.transactionHash})`
+                  );
+                  
+                  const targetAddress = contractAddr;
+                  
+                  if (tx.to.toLowerCase() !== targetAddress.toLowerCase()) {
+                    console.log(`  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to} ≠ ${targetAddress})`);
+                    continue;
+                  }
+                  
                   // Use protocol-specific decoder
                   let wallet, asset, amount;
                   if (protocol === "aave") {

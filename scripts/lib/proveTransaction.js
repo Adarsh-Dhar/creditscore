@@ -146,15 +146,19 @@ async function proveTransaction({
   const isGatewayTx = gatewayAddress && tx.to && tx.to.toLowerCase() === gatewayAddress.toLowerCase();
 
   // Aave requires either Pool or Gateway, others only need Pool
+  let isValidProtocolTx = false;
   if (protocol === 'aave') {
-    if (!isPoolTx && !isGatewayTx) {
+    isValidProtocolTx = isPoolTx || isGatewayTx;
+  } else {
+    isValidProtocolTx = isPoolTx;
+  }
+
+  if (!isValidProtocolTx) {
+    if (protocol === 'aave') {
       throw new Error(
         `${sourceTxHash} was not sent to the Pool or Gateway contract (expected ${poolAddress} or ${gatewayAddress}, got ${tx.to}). Refusing to prove/score a non-Pool transaction.`
       );
-    }
-  } else {
-    // For non-Aave protocols, only check pool address
-    if (!isPoolTx) {
+    } else {
       throw new Error(
         `${sourceTxHash} was not sent to the ${protocol} contract (expected ${poolAddress}, got ${tx.to}). Refusing to prove/score a non-${protocol} transaction.`
       );
