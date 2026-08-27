@@ -6,17 +6,21 @@
   "main": "src/index.js",
   "scripts": {
     "index": "node src/index.js",
-    "studio": "npx prisma studio"
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "studio": "npx prisma studio",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/adapter-pg": "^7.2.0",
+    "@prisma/client": "^7.2.0",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.0",
     "pg": "^8.12.0"
   },
   "devDependencies": {
     "@types/pg": "^8.21.0",
-    "prisma": "^5.22.0",
+    "prisma": "^7.2.0",
     "typescript": "^5.4.0"
   }
 }

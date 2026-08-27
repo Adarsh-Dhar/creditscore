@@ -3,7 +3,7 @@ node_modules/
 *.db
 *.db-journal
 
-/src/generated/prisma
+/generated/prisma
 
 .agents
 .claude

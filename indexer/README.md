@@ -13,9 +13,11 @@ the main `creditscore-main` repo.
 
 ```bash
 cd indexer
-npm install
+docker compose up -d
 cp .env.example .env
-# fill in SEPOLIA_RPC
+# fill in SEPOLIA_RPC (DATABASE_URL is already set for local Docker Postgres)
+npm install
+npx prisma migrate deploy
 ```
 
 **RPC Provider Notes:**

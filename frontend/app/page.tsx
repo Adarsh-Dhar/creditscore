@@ -467,7 +467,7 @@ export default function Page() {
             <div className="error-banner">
               <AlertCircle size={16} />
               <span>{errors.weights}</span>
-              <button className="text-button" onClick={() => window.open('http://localhost:3002/api/health', '_blank')}>
+              <button className="text-button" onClick={() => window.open('http://localhost:3001/api/health', '_blank')}>
                 Check API status
               </button>
             </div>

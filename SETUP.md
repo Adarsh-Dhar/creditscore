@@ -54,6 +54,7 @@
    pnpm install
    pnpm approve-builds  # Approve Prisma build scripts
    npx prisma generate
+   npx prisma migrate deploy
    ```
 
 4. **Start the API server:**
@@ -61,7 +62,7 @@
    cd api
    pnpm run dev
    ```
-   The API will run on port 3002
+   The API will run on port 3001
 
 ## Frontend Setup
 
@@ -69,7 +70,7 @@
    ```bash
    cd frontend
    cp .env.local.example .env.local
-   # The API URL is already set to http://localhost:3002
+   # The API URL is already set to http://localhost:3001
    ```
 
 2. **Start the frontend:**
@@ -93,7 +94,7 @@
   4. Restart API server
 
 ### API returns 404 errors
-- Make sure the backend API server is running on port 3002
+- Make sure the backend API server is running on port 3001
 - Check that DATABASE_URL is correctly configured in api/.env
 - Ensure Prisma client has been generated: `cd api && npx prisma generate`
 
@@ -104,7 +105,7 @@
 
 ### CORS errors
 - Update CORS_ORIGINS in api/.env to include your frontend URL
-- Current config: `CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3002`
+- Current config: `CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3001`
 
 ### Wallet connection errors with browser extensions
 - **Symptom**: "Unexpected error" or "chrome-extension" errors when connecting wallet

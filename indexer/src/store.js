@@ -1,7 +1,15 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is not configured in .env');
+}
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 
 async function loadCheckpoint(chain, contractAddress) {
   const checkpoint = await prisma.indexerCheckpoint.findUnique({
@@ -69,6 +77,13 @@ async function loadUnprovenEvents(limit = 10, chain = null, protocol = null) {
   });
 }
 
+async function loadEventByTxHash(txHash) {
+  if (!txHash) return null;
+  return prisma.indexedEvent.findFirst({
+    where: { txHash: { equals: txHash, mode: 'insensitive' } },
+  });
+}
+
 async function markProven(txHash) {
   await prisma.indexedEvent.updateMany({
     where: { txHash },
@@ -94,6 +109,7 @@ module.exports = {
   loadCheckpoint,
   saveCheckpoint,
   loadEvents,
+  loadEventByTxHash,
   loadUnprovenEvents,
   saveEvent,
   markProven,

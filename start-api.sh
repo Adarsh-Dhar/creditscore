@@ -11,7 +11,7 @@ if [ ! -f .env ]; then
     echo "   Then run this script again."
     echo ""
     echo "Required configuration:"
-    echo "  DATABASE_URL=postgresql://username:password@localhost:5432/database_name"
+    echo "  DATABASE_URL=postgresql://creditscore:devpass@localhost:5433/creditscore?schema=public"
     echo "  CONTRACT_ADDRESS=your_actual_contract_address"
     echo "  CC3_TESTNET_RPC=your_rpc_url (or SEPOLIA_RPC)"
     exit 1
@@ -48,5 +48,5 @@ echo "Generating Prisma client..."
 npx prisma generate
 
 # Start the server
-echo "Starting API server on port 3002..."
-PORT=3002 pnpm run dev
+echo "Starting API server on port 3001..."
+PORT=3001 pnpm run dev
