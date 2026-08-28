@@ -58,6 +58,17 @@ async function saveEvent(eventData) {
   });
 }
 
+async function upsertEvent(eventData) {
+  const { txHash, logIndex, ...rest } = eventData;
+  return prisma.indexedEvent.upsert({
+    where: {
+      txHash_logIndex: { txHash, logIndex },
+    },
+    create: eventData,
+    update: rest,
+  });
+}
+
 async function loadUnprovenEvents(limit = 10, chain = null, protocol = null) {
   const where = { proven: false };
   if (chain) {
@@ -112,6 +123,7 @@ module.exports = {
   loadEventByTxHash,
   loadUnprovenEvents,
   saveEvent,
+  upsertEvent,
   markProven,
   getSeenKeys,
   disconnect,

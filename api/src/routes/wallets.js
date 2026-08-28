@@ -17,7 +17,9 @@ router.get('/:address/events', async (req, res, next) => {
     }
     const checksummedAddress = ethers.getAddress(address);
 
-    const where = { wallet: checksummedAddress };
+    const where = {
+      wallet: { equals: checksummedAddress, mode: 'insensitive' },
+    };
     if (eventName) {
       where.eventName = eventName;
     }
@@ -80,23 +82,23 @@ router.get('/:address/summary', async (req, res, next) => {
         liquidationCount: '0'
       })),
       prisma.indexedEvent.count({
-        where: { 
-          wallet: checksummedAddress,
-          proven: false 
+        where: {
+          wallet: { equals: checksummedAddress, mode: 'insensitive' },
+          proven: false
         }
       }).catch(() => 0)
     ]);
 
     // Get last event timestamp
     const lastEvent = await prisma.indexedEvent.findFirst({
-      where: { wallet: checksummedAddress },
+      where: { wallet: { equals: checksummedAddress, mode: 'insensitive' } },
       orderBy: { blockNumber: 'desc' }
     });
 
     // Get protocol breakdown from DB (off-chain only)
     const protocolBreakdown = await prisma.indexedEvent.groupBy({
       by: ['protocol', 'eventName'],
-      where: { wallet: checksummedAddress },
+      where: { wallet: { equals: checksummedAddress, mode: 'insensitive' } },
       _count: { id: true }
     });
 
