@@ -69,6 +69,7 @@ export interface IndexedEvent {
   asset: string | null;
   amount: string;
   chain: string;
+  protocol?: string;
   timestamp: number | null;
   proven: boolean;
   createdAt: string;
