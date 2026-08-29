@@ -1,5 +1,20 @@
+export interface ProtocolConfig {
+  id: string;
+  poolAddress: string;
+  abi: string[];
+  wethGatewayAddress?: string;
+  wethGatewayAbi?: string[];
+}
+
+export interface ChainConfig {
+  name: string;
+  rpcEnvVar: string;
+  numericChainId: number;
+  protocols: ProtocolConfig[];
+}
+
 // Aave V3 Pool events — taken from Aave V3's IPool ABI
-const AAVE_EVENT_ABI = [
+export const AAVE_EVENT_ABI: string[] = [
   "event Supply(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
   "event Borrow(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint8 interestRateMode, uint256 borrowRate, uint16 indexed referralCode)",
   "event Repay(address indexed reserve, address indexed user, address indexed repayer, uint256 amount, bool useATokens)",
@@ -8,21 +23,21 @@ const AAVE_EVENT_ABI = [
 ];
 
 // Aave V3 WETHGateway events — taken from Aave's WETHGateway ABI
-const AAVE_WETHGATEWAY_EVENT_ABI = [
+export const AAVE_WETHGATEWAY_EVENT_ABI: string[] = [
   "event DepositETH(address indexed reserve, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)",
   "event WithdrawETH(address indexed reserve, address indexed to, uint256 amount)",
 ];
 
 // Compound Comet events — taken from Compound Comet ABI
 // Note: Comet only has Supply/Withdraw/Absorb events. Borrow/Repay are tracked via asset type
-const COMPOUND_EVENT_ABI = [
+export const COMPOUND_EVENT_ABI: string[] = [
   "event Supply(address indexed asset, address indexed from, uint256 amount)",
   "event Withdraw(address indexed asset, address indexed to, uint256 amount)",
   "event Absorb(address indexed absorber, address[] indexed accounts)",
 ];
 
 // Morpho Blue events — taken from Morpho Blue ABI
-const MORPHO_EVENT_ABI = [
+export const MORPHO_EVENT_ABI: string[] = [
   "event SupplyCollateral(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
   "event WithdrawCollateral(bytes32 indexed id, address indexed owner, address indexed receiver, uint256 amount, uint256 shares)",
   "event Supply(bytes32 indexed id, address indexed supplier, address indexed onBehalfOf, uint256 amount, uint256 shares)",
@@ -34,7 +49,7 @@ const MORPHO_EVENT_ABI = [
 
 // Chain configuration for multi-chain, multi-protocol support
 // Each chain entry defines the RPC URL, chain ID, and nested protocol configurations
-const CHAINS = [
+export const CHAINS: ChainConfig[] = [
   {
     name: "sepolia",
     rpcEnvVar: "SEPOLIA_RPC",
@@ -82,10 +97,10 @@ const CHAINS = [
 ];
 
 // Generic event names used for EventType enum (protocol-agnostic)
-const GENERIC_EVENT_NAMES = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"];
+export const GENERIC_EVENT_NAMES: string[] = ["Supply", "Borrow", "Repay", "Withdraw", "LiquidationCall"];
 
 // Protocol-specific event name mapping to generic EventType
-const EVENT_NAME_MAP = {
+export const EVENT_NAME_MAP: Record<string, Record<string, string>> = {
   aave: {
     "Supply": "Supply",
     "Borrow": "Borrow",
@@ -111,26 +126,12 @@ const EVENT_NAME_MAP = {
   },
 };
 
-const CHUNK_SIZE = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
+export const CHUNK_SIZE: number = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
 
 // Backward compatibility exports
-const POOL_EVENT_ABI = AAVE_EVENT_ABI;
-const CHAIN_EVENT_ABIS = {
+export const POOL_EVENT_ABI: string[] = AAVE_EVENT_ABI;
+export const CHAIN_EVENT_ABIS: Record<string, string[]> = {
   sepolia: AAVE_EVENT_ABI,
   "cc3-testnet": AAVE_EVENT_ABI,
 };
-const EVENT_NAMES = GENERIC_EVENT_NAMES;
-
-module.exports = { 
-  CHAINS, 
-  AAVE_EVENT_ABI, 
-  AAVE_WETHGATEWAY_EVENT_ABI,
-  COMPOUND_EVENT_ABI, 
-  MORPHO_EVENT_ABI, 
-  POOL_EVENT_ABI, 
-  CHAIN_EVENT_ABIS, 
-  EVENT_NAMES, 
-  GENERIC_EVENT_NAMES, 
-  EVENT_NAME_MAP, 
-  CHUNK_SIZE 
-};
+export const EVENT_NAMES: string[] = GENERIC_EVENT_NAMES;

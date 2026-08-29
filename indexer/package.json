@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "description": "Off-chain indexer: scans Aave V3 Sepolia Pool events and produces SOURCE_TX_HASH candidates for the CreditScoreMVP prove step.",
   "type": "commonjs",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "index": "node src/index.js",
+    "build": "tsc -p tsconfig.json",
+    "index": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
     "generate": "prisma generate",
     "migrate": "prisma migrate deploy",
     "studio": "npx prisma studio",
@@ -19,8 +22,10 @@
     "pg": "^8.12.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "@types/pg": "^8.21.0",
     "prisma": "^7.2.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   }
 }

@@ -12,44 +12,63 @@
  *   npm run index -- --from-block 1234567    # override checkpoint, re-scan from this block
  */
 
-const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
-const { JsonRpcProvider, Contract, Interface } = require("ethers");
-const { CHAINS, AAVE_EVENT_ABI, AAVE_WETHGATEWAY_EVENT_ABI, COMPOUND_EVENT_ABI, MORPHO_EVENT_ABI, EVENT_NAME_MAP, GENERIC_EVENT_NAMES, CHUNK_SIZE } = require("./config");
-const { extractWallet: extractAaveWallet, extractAssetAndAmount: extractAaveAssetAndAmount } = require("./aaveDecoder");
-const { extractWallet: extractCompoundWallet, extractAssetAndAmount: extractCompoundAssetAndAmount, classifyCompoundEvent } = require("./compoundDecoder");
-const { extractWallet: extractMorphoWallet, extractAssetAndAmount: extractMorphoAssetAndAmount } = require("./morphoDecoder");
-const { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, disconnect } = require("./store");
+import path from "node:path";
+import dotenv from "dotenv";
+
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+
+import { JsonRpcProvider, Contract, Interface } from "ethers";
+import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE } from "./config";
+import {
+  extractWallet as extractAaveWallet,
+  extractAssetAndAmount as extractAaveAssetAndAmount,
+} from "./aaveDecoder";
+import {
+  extractWallet as extractCompoundWallet,
+  extractAssetAndAmount as extractCompoundAssetAndAmount,
+  classifyCompoundEvent,
+} from "./compoundDecoder";
+import {
+  extractWallet as extractMorphoWallet,
+  extractAssetAndAmount as extractMorphoAssetAndAmount,
+} from "./morphoDecoder";
+import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect } from "./store";
+import type { IndexedEvent } from "@prisma/client";
 
 // Retry configuration for RPC rate limiting
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 const QUERY_DELAY = 500; // 500ms delay between event type queries
 
-async function retryWithBackoff(fn, context = "") {
-  let lastError;
+async function retryWithBackoff<T>(fn: () => Promise<T>, context = ""): Promise<T> {
+  let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       return await fn();
-    } catch (err) {
+    } catch (err: any) {
       lastError = err;
-      const isRateLimit = err.code === -32005 || err.message?.includes("Too Many Requests") || err.message?.includes("429");
-      
+      const isRateLimit =
+        err?.code === -32005 || err?.message?.includes("Too Many Requests") || err?.message?.includes("429");
+
       if (!isRateLimit || attempt === MAX_RETRIES) {
         throw err;
       }
-      
+
       const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
       console.log(`  ! Rate limited on ${context}, retry ${attempt}/${MAX_RETRIES} in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
   throw lastError;
 }
 
-function parseArgs() {
+interface CliArgs {
+  fromBlock?: number;
+}
+
+function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  const out = {};
+  const out: CliArgs = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--from-block") {
       out.fromBlock = Number(args[i + 1]);
@@ -59,14 +78,24 @@ function parseArgs() {
   return out;
 }
 
-function resolveFromBlock({ cliFromBlock, checkpointBlock, startBlockEnv, latestBlock }) {
+function resolveFromBlock({
+  cliFromBlock,
+  checkpointBlock,
+  startBlockEnv,
+  latestBlock,
+}: {
+  cliFromBlock: number | undefined;
+  checkpointBlock: number | null;
+  startBlockEnv: string | undefined;
+  latestBlock: number;
+}): number {
   if (cliFromBlock != null) return cliFromBlock; // explicit override wins
   if (checkpointBlock != null) return checkpointBlock + 1; // normal resume path
   if (startBlockEnv) return Number(startBlockEnv); // first-ever run, configured start
   return latestBlock; // first-ever run, no config: start from "now"
 }
 
-async function main() {
+async function main(): Promise<void> {
   const cli = parseArgs();
   const seenKeys = await getSeenKeys();
 
@@ -75,7 +104,7 @@ async function main() {
   try {
     // Process each chain independently
     for (const chainConfig of CHAINS) {
-      const { name: chain, rpcEnvVar, numericChainId, protocols } = chainConfig;
+      const { name: chain, rpcEnvVar, protocols } = chainConfig;
       const rpcUrl = process.env[rpcEnvVar];
 
       if (!rpcUrl) {
@@ -88,29 +117,34 @@ async function main() {
 
       // Process each protocol within the chain
       for (const protocolConfig of protocols) {
-        const { id: protocol, poolAddress: contractAddress, abi, wethGatewayAddress, wethGatewayAbi } = protocolConfig;
-        
+        const { id: protocol, poolAddress: contractAddress, abi, wethGatewayAddress, wethGatewayAbi } =
+          protocolConfig;
+
         if (!contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
           console.log(`Skipping ${protocol} on ${chain}: pool address not configured`);
           continue;
         }
 
         console.log(`Processing protocol: ${protocol} (${contractAddress})`);
-        
+
         // For Aave, also process WETHGateway if configured
-        const contractsToIndex = [];
-        
+        const contractsToIndex: { type: "pool" | "gateway"; address: string; abi: string[] }[] = [];
+
         contractsToIndex.push({
-          type: 'pool',
+          type: "pool",
           address: contractAddress,
-          abi: abi,
+          abi,
         });
-        
-        if (protocol === 'aave' && wethGatewayAddress && wethGatewayAddress !== "0x0000000000000000000000000000000000000000") {
+
+        if (
+          protocol === "aave" &&
+          wethGatewayAddress &&
+          wethGatewayAddress !== "0x0000000000000000000000000000000000000000"
+        ) {
           contractsToIndex.push({
-            type: 'gateway',
+            type: "gateway",
             address: wethGatewayAddress,
-            abi: wethGatewayAbi,
+            abi: wethGatewayAbi ?? [],
           });
           console.log(`Also indexing WETHGateway: ${wethGatewayAddress}`);
         }
@@ -133,14 +167,16 @@ async function main() {
           });
 
           if (fromBlock > latestBlock) {
-            console.log(`Nothing to do for ${protocol} ${type} on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`);
+            console.log(
+              `Nothing to do for ${protocol} ${type} on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`
+            );
             continue;
           }
 
           console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
 
           let newCount = 0;
-          const blockTimestampCache = new Map(); // Cache block timestamps to avoid redundant calls
+          const blockTimestampCache = new Map<number, number>(); // Cache block timestamps to avoid redundant calls
 
           try {
             for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
@@ -149,12 +185,13 @@ async function main() {
 
               // Get protocol-specific event names
               const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
-              
+
               // For WETHGateway, only include gateway-specific events
-              const eventNamesToIndex = type === 'gateway' 
-                ? protocolEventNames.filter(name => name.includes('ETH'))
-                : protocolEventNames.filter(name => !name.includes('ETH'));
-              
+              const eventNamesToIndex =
+                type === "gateway"
+                  ? protocolEventNames.filter((name) => name.includes("ETH"))
+                  : protocolEventNames.filter((name) => !name.includes("ETH"));
+
               // One queryFilter per event type keeps ABI decoding unambiguous and
               // makes a failure on one event type easy to isolate and retry.
               for (let eventName of eventNamesToIndex) {
@@ -164,7 +201,7 @@ async function main() {
                     () => contract.queryFilter(contract.filters[eventName](), start, end),
                     `${eventName} (${start}-${end})`
                   );
-                } catch (err) {
+                } catch (err: any) {
                   console.error(`\n  ! queryFilter(${eventName}, ${start}, ${end}) failed after retries: ${err.message}`);
                   console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
                   throw err;
@@ -172,7 +209,7 @@ async function main() {
 
                 // Small delay between event types to avoid rate limiting
                 if (eventNamesToIndex.indexOf(eventName) < eventNamesToIndex.length - 1) {
-                  await new Promise(resolve => setTimeout(resolve, QUERY_DELAY));
+                  await new Promise((resolve) => setTimeout(resolve, QUERY_DELAY));
                 }
 
                 for (const log of logs) {
@@ -180,7 +217,8 @@ async function main() {
                   if (seenKeys.has(key)) continue;
 
                   const parsed = iface.parseLog(log);
-                  
+                  if (!parsed) continue;
+
                   // CRITICAL: Validate that transaction targets the protocol contract directly
                   // This prevents relayed/gas-station transactions from being added to the queue
                   // since the contract requires direct protocol calls for trustless decoding
@@ -188,21 +226,30 @@ async function main() {
                     () => provider.getTransaction(log.transactionHash),
                     `getTransaction(${log.transactionHash})`
                   );
-                  
+
+                  if (!tx || !tx.to) continue;
+
                   // Build valid targets for this protocol
                   // For Aave, accept both Pool and WETHGateway as valid entrypoints
                   // For other protocols, only accept the direct contract address
-                  const validTargetsForProtocol = protocol === 'aave' && wethGatewayAddress && wethGatewayAddress !== "0x0000000000000000000000000000000000000000"
-                    ? [contractAddr, wethGatewayAddress].map(a => a.toLowerCase())
-                    : [contractAddr.toLowerCase()];
+                  const validTargetsForProtocol =
+                    protocol === "aave" &&
+                    wethGatewayAddress &&
+                    wethGatewayAddress !== "0x0000000000000000000000000000000000000000"
+                      ? [contractAddr, wethGatewayAddress].map((a) => a.toLowerCase())
+                      : [contractAddr.toLowerCase()];
 
                   if (!validTargetsForProtocol.includes(tx.to.toLowerCase())) {
-                    console.log(`  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to}, expected one of: ${validTargetsForProtocol.join(", ")})`);
+                    console.log(
+                      `  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to}, expected one of: ${validTargetsForProtocol.join(", ")})`
+                    );
                     continue;
                   }
-                  
+
                   // Extract wallet, asset, and amount from event
-                  let wallet, asset, amount;
+                  let wallet: string | null | undefined;
+                  let asset: string | null | undefined;
+                  let amount: string | null;
                   if (protocol === "aave") {
                     wallet = extractAaveWallet(eventName, parsed.args);
                     ({ asset, amount } = extractAaveAssetAndAmount(eventName, parsed.args));
@@ -210,7 +257,7 @@ async function main() {
                     wallet = extractCompoundWallet(eventName, parsed.args);
                     ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain));
                     // Classify Compound event based on asset type
-                    const classifiedEventName = classifyCompoundEvent(eventName, asset, chain);
+                    const classifiedEventName = classifyCompoundEvent(eventName, asset ?? null, chain);
                     // Use the classified event name for further processing
                     eventName = classifiedEventName;
                   } else if (protocol === "morpho") {
@@ -221,19 +268,21 @@ async function main() {
                     continue;
                   }
 
+                  if (!wallet) continue;
+
                   // Map protocol-specific event name to generic event name
                   const genericEventName = EVENT_NAME_MAP[protocol]?.[eventName] || eventName;
 
                   // Get block timestamp (cached per block number)
-                  let timestamp;
+                  let timestamp: number;
                   if (blockTimestampCache.has(log.blockNumber)) {
-                    timestamp = blockTimestampCache.get(log.blockNumber);
+                    timestamp = blockTimestampCache.get(log.blockNumber)!;
                   } else {
                     const block = await retryWithBackoff(
                       () => provider.getBlock(log.blockNumber),
                       `getBlock(${log.blockNumber})`
                     );
-                    timestamp = block.timestamp;
+                    timestamp = block!.timestamp;
                     blockTimestampCache.set(log.blockNumber, timestamp);
                   }
 
@@ -243,8 +292,8 @@ async function main() {
                     blockNumber: log.blockNumber,
                     eventName: genericEventName,
                     wallet,
-                    asset,
-                    amount,
+                    asset: asset ?? null,
+                    amount: amount ?? "0",
                     chain, // Use the chain name from config
                     protocol, // Add protocol field
                     timestamp,
@@ -259,12 +308,14 @@ async function main() {
 
             await saveCheckpoint(chain, contractAddress, latestBlock);
 
-          console.log(`Indexed ${newCount} new event(s) for ${protocol} ${type} on ${chain}. Checkpoint advanced to block ${latestBlock}.`);
-          totalNewCount += newCount;
-        } catch (err) {
-          console.error(`Error processing ${protocol} ${type} on ${chain}: ${err.message}`);
-          // Continue with other contracts even if one fails
-        }
+            console.log(
+              `Indexed ${newCount} new event(s) for ${protocol} ${type} on ${chain}. Checkpoint advanced to block ${latestBlock}.`
+            );
+            totalNewCount += newCount;
+          } catch (err: any) {
+            console.error(`Error processing ${protocol} ${type} on ${chain}: ${err.message}`);
+            // Continue with other contracts even if one fails
+          }
         }
       }
     }
@@ -272,17 +323,16 @@ async function main() {
     console.log(`\n=== Total: ${totalNewCount} new event(s) indexed across all chains ===`);
 
     // Load events for summary
-    const { loadEvents } = require('./store');
     const eventStore = await loadEvents();
     printSummary(eventStore);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`Fatal error in main: ${err.message}`);
   } finally {
     await disconnect();
   }
 }
 
-function printSummary(eventStore) {
+function printSummary(eventStore: IndexedEvent[]): void {
   const unproven = eventStore.filter((e) => !e.proven);
   if (unproven.length === 0) {
     console.log("No unproven events queued.");
@@ -290,7 +340,7 @@ function printSummary(eventStore) {
   }
 
   // Group by chain for better organization
-  const byChain = {};
+  const byChain: Record<string, IndexedEvent[]> = {};
   for (const e of unproven) {
     if (!byChain[e.chain]) {
       byChain[e.chain] = [];
@@ -299,7 +349,7 @@ function printSummary(eventStore) {
   }
 
   console.log(`\n${unproven.length} event(s) ready to prove across ${Object.keys(byChain).length} chain(s):`);
-  
+
   for (const [chain, chainEvents] of Object.entries(byChain)) {
     console.log(`\n  ${chain} (${chainEvents.length} events):`);
     for (const e of chainEvents.slice(0, 5)) {

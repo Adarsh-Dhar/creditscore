@@ -4,19 +4,32 @@
  * scanned by the full indexer.
  */
 
-const { JsonRpcProvider, Interface, getAddress, isAddress } = require("ethers");
-const { CHAINS, EVENT_NAME_MAP } = require("./config");
-const { extractWallet: extractAaveWallet, extractAssetAndAmount: extractAaveAssetAndAmount } = require("./aaveDecoder");
-const { extractWallet: extractCompoundWallet, extractAssetAndAmount: extractCompoundAssetAndAmount, classifyCompoundEvent } = require("./compoundDecoder");
-const { extractWallet: extractMorphoWallet, extractAssetAndAmount: extractMorphoAssetAndAmount } = require("./morphoDecoder");
-const { upsertEvent } = require("./store");
+import { JsonRpcProvider, Interface, getAddress, isAddress, type Log } from "ethers";
+import { CHAINS, EVENT_NAME_MAP, type ProtocolConfig, type ChainConfig } from "./config";
+import {
+  extractWallet as extractAaveWallet,
+  extractAssetAndAmount as extractAaveAssetAndAmount,
+} from "./aaveDecoder";
+import {
+  extractWallet as extractCompoundWallet,
+  extractAssetAndAmount as extractCompoundAssetAndAmount,
+  classifyCompoundEvent,
+} from "./compoundDecoder";
+import {
+  extractWallet as extractMorphoWallet,
+  extractAssetAndAmount as extractMorphoAssetAndAmount,
+} from "./morphoDecoder";
+import { upsertEvent, type NewIndexedEvent } from "./store";
 
-function checksum(addr) {
+function checksum(addr: string | null | undefined): string | null | undefined {
   if (!addr || !isAddress(addr)) return addr;
   return getAddress(addr);
 }
 
-function resolveProtocolConfig(chain, protocol) {
+function resolveProtocolConfig(
+  chain: string,
+  protocol: string
+): { chainConfig: ChainConfig; protocolConfig: ProtocolConfig } {
   const chainConfig = CHAINS.find((c) => c.name === chain);
   if (!chainConfig) {
     throw new Error(`Unknown chain: ${chain}`);
@@ -28,7 +41,19 @@ function resolveProtocolConfig(chain, protocol) {
   return { chainConfig, protocolConfig };
 }
 
-function decodeLog(log, protocol, protocolConfig, chain) {
+interface DecodedFields {
+  eventName: string;
+  wallet: string | null | undefined;
+  asset: string | null | undefined;
+  amount: string | null;
+}
+
+function decodeLog(
+  log: Log,
+  protocol: string,
+  protocolConfig: ProtocolConfig,
+  chain: string
+): DecodedFields | null {
   const poolIface = new Interface(protocolConfig.abi);
   const gatewayIface =
     protocol === "aave" && protocolConfig.wethGatewayAbi
@@ -51,9 +76,9 @@ function decodeLog(log, protocol, protocolConfig, chain) {
   if (!parsed) return null;
 
   let eventName = parsed.name;
-  let wallet;
-  let asset;
-  let amount;
+  let wallet: string | null | undefined;
+  let asset: string | null | undefined;
+  let amount: string | null;
 
   if (protocol === "aave") {
     wallet = extractAaveWallet(eventName, parsed.args);
@@ -61,7 +86,7 @@ function decodeLog(log, protocol, protocolConfig, chain) {
   } else if (protocol === "compound") {
     wallet = extractCompoundWallet(eventName, parsed.args);
     ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain));
-    eventName = classifyCompoundEvent(eventName, asset, chain);
+    eventName = classifyCompoundEvent(eventName, asset ?? null, chain);
   } else if (protocol === "morpho") {
     wallet = extractMorphoWallet(eventName, parsed.args);
     ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));
@@ -78,18 +103,17 @@ function decodeLog(log, protocol, protocolConfig, chain) {
   };
 }
 
-/**
- * @param {object} params
- * @param {string} params.txHash
- * @param {string} params.chain
- * @param {string} params.protocol
- * @param {string} params.sourceRpc
- * @param {string} [params.expectedWallet]
- * @param {string} [params.eventName]
- * @param {boolean} [params.proven]
- * @returns {Promise<object|null>} the upserted row that best matches, or null
- */
-async function indexSingleTx({
+export interface IndexSingleTxParams {
+  txHash: string;
+  chain: string;
+  protocol: string;
+  sourceRpc: string;
+  expectedWallet?: string;
+  eventName?: string;
+  proven?: boolean;
+}
+
+export async function indexSingleTx({
   txHash,
   chain,
   protocol,
@@ -97,7 +121,7 @@ async function indexSingleTx({
   expectedWallet,
   eventName,
   proven = true,
-}) {
+}: IndexSingleTxParams) {
   const { protocolConfig } = resolveProtocolConfig(chain, protocol);
   const poolAddress = protocolConfig.poolAddress;
   const gatewayAddress = protocolConfig.wethGatewayAddress;
@@ -107,7 +131,7 @@ async function indexSingleTx({
   }
 
   const validTargets = [poolAddress, gatewayAddress]
-    .filter((a) => a && a !== "0x0000000000000000000000000000000000000000")
+    .filter((a): a is string => !!a && a !== "0x0000000000000000000000000000000000000000")
     .map((a) => a.toLowerCase());
 
   const provider = new JsonRpcProvider(sourceRpc);
@@ -131,7 +155,7 @@ async function indexSingleTx({
   const timestamp = block?.timestamp ?? null;
   const expected = expectedWallet ? checksum(expectedWallet) : null;
 
-  const decoded = [];
+  const decoded: NewIndexedEvent[] = [];
   for (const log of receipt.logs) {
     if (!validTargets.includes(log.address.toLowerCase())) continue;
     const fields = decodeLog(log, protocol, protocolConfig, chain);
@@ -142,7 +166,7 @@ async function indexSingleTx({
       blockNumber: receipt.blockNumber,
       eventName: fields.eventName,
       wallet: fields.wallet,
-      asset: fields.asset,
+      asset: fields.asset ?? null,
       amount: fields.amount ?? "0",
       chain,
       protocol,
@@ -177,5 +201,3 @@ async function indexSingleTx({
   }
   return last;
 }
-
-module.exports = { indexSingleTx };
