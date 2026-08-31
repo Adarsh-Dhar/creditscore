@@ -10,6 +10,7 @@
  * Usage:
  *   npm run index                            # scan from checkpoint (or START_BLOCK) to latest
  *   npm run index -- --from-block 1234567    # override checkpoint, re-scan from this block
+ *   npm run index:watch                      # backfill from checkpoint, then live-listen for new events
  */
 
 import path from "node:path";
@@ -254,6 +255,7 @@ async function retryWithBackoff<T>(fn: () => Promise<T>, context = ""): Promise<
 
 interface CliArgs {
   fromBlock?: number;
+  watch?: boolean;
 }
 
 function parseArgs(): CliArgs {
@@ -263,6 +265,8 @@ function parseArgs(): CliArgs {
     if (args[i] === "--from-block") {
       out.fromBlock = Number(args[i + 1]);
       i++;
+    } else if (args[i] === "--watch") {
+      out.watch = true;
     }
   }
   return out;
@@ -285,8 +289,7 @@ function resolveFromBlock({
   return latestBlock; // first-ever run, no config: start from "now"
 }
 
-async function main(): Promise<void> {
-  const cli = parseArgs();
+async function runOnce(cli: CliArgs): Promise<number> {
   const seenKeys = await getSeenKeys();
 
   let totalNewCount = 0;
@@ -488,15 +491,147 @@ async function main(): Promise<void> {
     }
 
     console.log(`\n=== Total: ${totalNewCount} new event(s) indexed across all chains ===`);
-
-    // Load events for summary
-    const eventStore = await loadEvents();
-    printSummary(eventStore);
   } catch (err: any) {
-    console.error(`Fatal error in main: ${err.message}`);
-  } finally {
-    await disconnect();
+    console.error(`Fatal error in runOnce: ${err.message}`);
   }
+  return totalNewCount;
+}
+
+async function handleLiveLog(
+  log: Log,
+  contract: Contract,
+  protocol: string,
+  chain: string,
+  emittingContractAddr: string,
+  poolAddress?: string
+): Promise<void> {
+  try {
+    // Validate that transaction targets the protocol contract directly
+    const provider = contract.runner as JsonRpcProvider;
+    const tx = await provider.getTransaction(log.transactionHash);
+
+    if (!tx || !tx.to) return;
+
+    // Build valid targets for this protocol
+    // For Aave pool events: accept pool address
+    // For Aave gateway events: accept both gateway and pool addresses
+    // For other protocols: only accept the direct contract address
+    const validTargetsForProtocol =
+      protocol === "aave" &&
+      poolAddress &&
+      poolAddress !== "0x0000000000000000000000000000000000000000"
+        ? [emittingContractAddr, poolAddress].map((a) => a.toLowerCase())
+        : [emittingContractAddr.toLowerCase()];
+
+    if (!validTargetsForProtocol.includes(tx.to.toLowerCase())) {
+      console.log(
+        `  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to}, expected one of: ${validTargetsForProtocol.join(", ")})`
+      );
+      return;
+    }
+
+    // Parse the log
+    const parsed = contract.interface.parseLog(log);
+    if (!parsed) return;
+
+    // Decode the log
+    const decoded = decodeParsedLog(parsed.name, parsed.args, protocol, chain);
+    if (!decoded || !decoded.wallet) return;
+
+    // Get block timestamp
+    const block = await provider.getBlock(log.blockNumber);
+    const timestamp = block?.timestamp ?? null;
+
+    // Upsert the event
+    await upsertEvent({
+      txHash: log.transactionHash,
+      logIndex: log.index,
+      blockNumber: log.blockNumber,
+      eventName: decoded.eventName,
+      wallet: decoded.wallet,
+      asset: decoded.asset ?? null,
+      amount: decoded.amount ?? "0",
+      chain,
+      protocol,
+      timestamp,
+      proven: false,
+    });
+
+    // Advance checkpoint (use pool address for checkpoint regardless of which contract emitted the event)
+    const checkpointAddress = poolAddress || emittingContractAddr;
+    await saveCheckpoint(chain, checkpointAddress, log.blockNumber);
+
+    console.log(`  → Live event: ${decoded.eventName} for ${decoded.wallet} in tx ${log.transactionHash.substring(0, 10)}...`);
+  } catch (err: any) {
+    console.error(`  ! Error handling live log: ${err.message}`);
+  }
+}
+
+async function startLiveListeners(): Promise<Contract[]> {
+  const contracts: Contract[] = [];
+
+  for (const chainConfig of CHAINS) {
+    const { name: chain, rpcEnvVar, protocols } = chainConfig;
+    const rpcUrl = process.env[rpcEnvVar];
+
+    if (!rpcUrl) {
+      console.log(`Skipping ${chain} for live listening: missing ${rpcEnvVar} in .env`);
+      continue;
+    }
+
+    console.log(`\n=== Setting up live listeners for chain: ${chain} ===`);
+    const provider = new JsonRpcProvider(rpcUrl);
+
+    for (const protocolConfig of protocols) {
+      const { id: protocol, poolAddress: contractAddress, abi, wethGatewayAddress, wethGatewayAbi } =
+        protocolConfig;
+
+      if (!contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
+        console.log(`Skipping ${protocol} on ${chain}: pool address not configured`);
+        continue;
+      }
+
+      console.log(`Setting up listeners for ${protocol} (${contractAddress})`);
+
+      // Setup pool contract listeners
+      const poolContract = new Contract(contractAddress, abi, provider);
+      contracts.push(poolContract);
+
+      const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
+      const poolEventNames = protocolEventNames.filter((name) => !name.includes("ETH"));
+
+      for (const eventName of poolEventNames) {
+        poolContract.on(eventName, (...args) => {
+          const log = args[args.length - 1] as Log;
+          handleLiveLog(log, poolContract, protocol, chain, contractAddress, wethGatewayAddress);
+        });
+        console.log(`  → Listening for ${eventName} on pool`);
+      }
+
+      // Setup WETHGateway listeners for Aave
+      if (
+        protocol === "aave" &&
+        wethGatewayAddress &&
+        wethGatewayAddress !== "0x0000000000000000000000000000000000000000" &&
+        wethGatewayAbi
+      ) {
+        const gatewayContract = new Contract(wethGatewayAddress, wethGatewayAbi, provider);
+        contracts.push(gatewayContract);
+
+        const gatewayEventNames = protocolEventNames.filter((name) => name.includes("ETH"));
+
+        for (const eventName of gatewayEventNames) {
+          gatewayContract.on(eventName, (...args) => {
+            const log = args[args.length - 1] as Log;
+            handleLiveLog(log, gatewayContract, protocol, chain, wethGatewayAddress, contractAddress);
+          });
+          console.log(`  → Listening for ${eventName} on WETHGateway`);
+        }
+      }
+    }
+  }
+
+  return contracts;
 }
 
 function printSummary(eventStore: IndexedEvent[]): void {
@@ -528,6 +663,37 @@ function printSummary(eventStore: IndexedEvent[]): void {
   console.log(
     `\nNote: batch cap is 10 queries per continuity proof per chain — batch in groups of <=10 per chain.`
   );
+}
+
+async function main(): Promise<void> {
+  const cli = parseArgs();
+
+  if (cli.watch) {
+    console.log("Backfilling from last checkpoint...");
+    await runOnce(cli);
+
+    const contracts = await startLiveListeners();
+    console.log("\nLive-listening for new events. Ctrl+C to stop.");
+
+    let shuttingDown = false;
+    const shutdown = () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log("\nShutdown requested, stopping listeners...");
+      Promise.all(contracts.map((c) => c.removeAllListeners()))
+        .then(() => disconnect())
+        .finally(() => process.exit(0));
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+
+    return;
+  }
+
+  await runOnce(cli);
+  const eventStore = await loadEvents();
+  printSummary(eventStore);
+  await disconnect();
 }
 
 if (require.main === module) {

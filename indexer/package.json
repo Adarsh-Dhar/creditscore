@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "index": "tsx src/index.ts",
+    "index:watch": "tsx src/index.ts --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "generate": "prisma generate",
