@@ -150,4 +150,32 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
   }
 });
 
+// POST /api/wallets/:address/register - register a wallet for points tracking
+router.post("/:address/register", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { address } = req.params;
+
+    // Validate and checksum address
+    if (!ethers.isAddress(address)) {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
+    const checksummedAddress = ethers.getAddress(address);
+
+    // Upsert the wallet in RegisteredWallet
+    const wallet = await prisma.registeredWallet.upsert({
+      where: { wallet: checksummedAddress },
+      update: { lastSeenAt: new Date() },
+      create: { wallet: checksummedAddress, points: 0 },
+    });
+
+    res.json({
+      wallet: wallet.wallet,
+      points: wallet.points,
+      registered: true,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

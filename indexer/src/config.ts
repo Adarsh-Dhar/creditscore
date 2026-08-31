@@ -128,6 +128,14 @@ export const EVENT_NAME_MAP: Record<string, Record<string, string>> = {
 
 export const CHUNK_SIZE: number = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
 
+export const POINTS_BY_EVENT: Record<string, number> = {
+  Supply: 5,
+  Borrow: 2,
+  Repay: 15,
+  Withdraw: 0,
+  LiquidationCall: -20,
+};
+
 // Backward compatibility exports
 export const POOL_EVENT_ABI: string[] = AAVE_EVENT_ABI;
 export const CHAIN_EVENT_ABIS: Record<string, string[]> = {

@@ -39,3 +39,11 @@ model IndexerCheckpoint {
 
   @@unique([chain, contractAddress])
 }
+
+model RegisteredWallet {
+  id         Int      @id @default(autoincrement())
+  wallet     String   @unique
+  points     Int      @default(0)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @updatedAt
+}

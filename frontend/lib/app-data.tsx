@@ -9,6 +9,7 @@ import {
   leaderboard,
   weights,
   chainsStatus,
+  registerWallet,
   type WalletSummary,
   type IndexedEvent,
   type LeaderboardEntry,
@@ -231,6 +232,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     loadWalletData(addressToLoad)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchAddress, walletAddress])
+
+  // Auto-register wallet when connected
+  useEffect(() => {
+    if (!walletAddress) return
+
+    const autoRegister = async () => {
+      try {
+        await registerWallet(walletAddress)
+      } catch (e) {
+        // Silently fail - registration is optional
+        console.debug('Auto-registration failed:', e)
+      }
+    }
+
+    autoRegister()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletAddress])
 
   const loadLeaderboard = async () => {
     setLoading(prev => ({ ...prev, leaderboard: true }))

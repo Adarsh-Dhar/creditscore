@@ -97,6 +97,12 @@ export interface LeaderboardResponse {
   limit: number;
 }
 
+export interface RegisterWalletResponse {
+  wallet: string;
+  points: number;
+  registered: boolean;
+}
+
 export interface WeightsResponse {
   supplyWeight: string;
   borrowWeight: string;
@@ -153,4 +159,10 @@ export async function weights(): Promise<WeightsResponse> {
 
 export async function chainsStatus(): Promise<ChainsStatusResponse> {
   return fetchAPI<ChainsStatusResponse>('/api/chains/status');
+}
+
+export async function registerWallet(address: string): Promise<RegisterWalletResponse> {
+  return fetchAPI<RegisterWalletResponse>(`/api/wallets/${address}/register`, {
+    method: 'POST',
+  });
 }

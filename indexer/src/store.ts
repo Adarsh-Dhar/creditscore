@@ -6,6 +6,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type IndexedEvent, type Prisma } from "@prisma/client";
+import { POINTS_BY_EVENT } from "./config";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env");
@@ -63,20 +64,37 @@ export async function loadEvents(): Promise<IndexedEvent[]> {
 }
 
 export async function saveEvent(eventData: NewIndexedEvent): Promise<IndexedEvent> {
-  return prisma.indexedEvent.create({
+  const event = await prisma.indexedEvent.create({
     data: eventData,
   });
+  // Award points unconditionally for new events
+  await awardPoints(eventData.wallet, eventData.eventName);
+  return event;
 }
 
 export async function upsertEvent(eventData: NewIndexedEvent): Promise<IndexedEvent> {
   const { txHash, logIndex, ...rest } = eventData;
-  return prisma.indexedEvent.upsert({
+  
+  // Check if event already exists before upsert
+  const existing = await prisma.indexedEvent.findUnique({
+    where: { txHash_logIndex: { txHash, logIndex } },
+    select: { id: true },
+  });
+
+  const event = await prisma.indexedEvent.upsert({
     where: {
       txHash_logIndex: { txHash, logIndex },
     },
     create: eventData,
     update: rest,
   });
+
+  // Only award points for new events (when existing was null)
+  if (!existing) {
+    await awardPoints(eventData.wallet, eventData.eventName);
+  }
+
+  return event;
 }
 
 export async function loadUnprovenEvents(
@@ -125,4 +143,21 @@ export async function getSeenKeys(): Promise<Set<string>> {
 
 export async function disconnect(): Promise<void> {
   await prisma.$disconnect();
+}
+
+export async function awardPoints(wallet: string, eventName: string): Promise<void> {
+  const points = POINTS_BY_EVENT[eventName];
+  if (points === undefined || points === 0) return;
+
+  await prisma.registeredWallet.upsert({
+    where: { wallet },
+    update: {
+      points: { increment: points },
+      lastSeenAt: new Date(),
+    },
+    create: {
+      wallet,
+      points,
+    },
+  });
 }

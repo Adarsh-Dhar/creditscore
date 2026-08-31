@@ -1,64 +1,34 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import prisma from "../db";
-import { getScore } from "../chain";
 
 const router = express.Router();
 
-interface ScoredWallet {
-  wallet: string;
-  score: number;
-}
-
-// GET /api/leaderboard - top wallets by score
-// NOTE: This is a live-computed stopgap for MVP. In production, this should
-// be cached/snapshotted rather than recomputed on every request, since it
-// requires N RPC calls (one per distinct wallet in the DB).
+// GET /api/leaderboard - top wallets by points
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const maxWallets = parseInt(process.env.LEADERBOARD_MAX_WALLETS || "100");
     const limit = parseInt((req.query.limit as string) || "50");
     const effectiveLimit = Math.min(limit, maxWallets);
 
-    // Get distinct wallets from IndexedEvent
-    const wallets = await prisma.indexedEvent.findMany({
-      select: { wallet: true },
-      distinct: ["wallet"],
-      take: maxWallets,
+    // Get registered wallets ordered by points
+    const wallets = await prisma.registeredWallet.findMany({
+      select: { wallet: true, points: true },
+      orderBy: { points: "desc" },
+      take: effectiveLimit,
     });
 
-    // Fetch scores with concurrency cap to avoid overwhelming RPC
-    const CONCURRENCY = 5;
-    const results: ScoredWallet[] = [];
-
-    for (let i = 0; i < wallets.length; i += CONCURRENCY) {
-      const batch = wallets.slice(i, i + CONCURRENCY);
-      const batchResults = await Promise.all(
-        batch.map(async ({ wallet }): Promise<ScoredWallet> => {
-          try {
-            const score = await getScore(wallet);
-            return { wallet, score: parseInt(score) };
-          } catch (error: any) {
-            console.error(`Failed to fetch score for ${wallet}:`, error.message);
-            return { wallet, score: 0 };
-          }
-        })
-      );
-      results.push(...batchResults);
-    }
-
-    // Sort by score descending and limit
-    const sorted = results.sort((a, b) => b.score - a.score).slice(0, effectiveLimit);
-
     // Add ranks
-    const ranked = sorted.map((item, index) => ({
-      rank: index + 1,
-      wallet: item.wallet,
-      score: item.score,
+    const ranked = wallets.map((w, i) => ({
+      rank: i + 1,
+      wallet: w.wallet,
+      score: w.points,
     }));
+
+    const totalWallets = await prisma.registeredWallet.count();
 
     res.json({
       leaderboard: ranked,
-      totalWallets: wallets.length,
+      totalWallets,
       limit: effectiveLimit,
     });
   } catch (error) {
