@@ -149,15 +149,8 @@ export async function awardPoints(wallet: string, eventName: string): Promise<vo
   const points = POINTS_BY_EVENT[eventName];
   if (points === undefined || points === 0) return;
 
-  await prisma.registeredWallet.upsert({
-    where: { wallet },
-    update: {
-      points: { increment: points },
-      lastSeenAt: new Date(),
-    },
-    create: {
-      wallet,
-      points,
-    },
+  await prisma.registeredWallet.updateMany({
+    where: { wallet: { equals: wallet, mode: "insensitive" } },
+    data: { points: { increment: points } },
   });
 }
