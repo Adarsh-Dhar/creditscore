@@ -21,7 +21,7 @@ const {
   markProven,
   disconnect,
 } = require("../indexer/src/store");
-const { indexSingleTx } = require("../indexer/src/indexSingleTx");
+const { indexSingleTx } = require("../indexer/src/index");
 
 const AAVE_SELECTORS = {
   "0x617ba037": "Supply",
@@ -29,25 +29,25 @@ const AAVE_SELECTORS = {
   "0x573ade81": "Repay",
   "0x69328dec": "Withdraw",
   "0x00a718a9": "LiquidationCall",
-  "0xf5660694": "Supply",
-  "0x5cfc1b2c": "Repay",
-  "0x8d7e78b6": "Repay",
+  "0x02c205f0": "Supply",
+  "0xee3e210b": "Repay",
+  "0x2dad97d4": "Repay",
   "0x474cf53d": "Supply",
-  "0x2e1a7d4d": "Withdraw",
+  "0x80500d20": "Withdraw",
 };
 
 const COMPOUND_SELECTORS = {
   "0xf2b9fdb8": "Supply",
   "0xf3fef3a3": "Withdraw",
-  "0x5f8a20a9": "LiquidationCall",
+  "0xc3cecfd2": "LiquidationCall",
 };
 
 const MORPHO_SELECTORS = {
-  "0x9e8c3c24": "Supply",
-  "0x7e26b4c4": "Withdraw",
-  "0xc5b7e5b8": "Borrow",
-  "0x8a3316e8": "Repay",
-  "0x9f2c5386": "LiquidationCall",
+  "0xa99aad89": "Supply",
+  "0x5c2bea49": "Withdraw",
+  "0x50d8cd4b": "Borrow",
+  "0x20b76e81": "Repay",
+  "0xd8eabcb8": "LiquidationCall",
 };
 
 function getRpcForChain(chain) {

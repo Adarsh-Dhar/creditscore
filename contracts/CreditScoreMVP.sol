@@ -89,29 +89,29 @@ contract CreditScoreMVP {
     bytes4 constant SEL_AAVE_REPAY = 0x573ade81;                 // repay(address,uint256,uint256,address)
     bytes4 constant SEL_AAVE_WITHDRAW = 0x69328dec;              // withdraw(address,uint256,address)
     bytes4 constant SEL_AAVE_LIQUIDATION_CALL = 0x00a718a9;      // liquidationCall(address,address,address,uint256,bool)
-    bytes4 constant SEL_AAVE_SUPPLY_WITH_PERMIT = 0xf5660694;    // supplyWithPermit(address,uint256,uint16,uint256,uint8,bytes32,bytes32)
-    bytes4 constant SEL_AAVE_REPAY_WITH_PERMIT = 0x5cfc1b2c;     // repayWithPermit(address,uint256,uint256,uint16,uint256,uint8,bytes32,bytes32)
-    bytes4 constant SEL_AAVE_REPAY_WITH_ATOKENS = 0x8d7e78b6;    // repayWithATokens(address,uint256,uint256,uint16,address)
+    bytes4 constant SEL_AAVE_SUPPLY_WITH_PERMIT = 0x02c205f0;    // supplyWithPermit(address,uint256,address,uint16,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_AAVE_REPAY_WITH_PERMIT = 0xee3e210b;     // repayWithPermit(address,uint256,uint256,address,uint256,uint8,bytes32,bytes32)
+    bytes4 constant SEL_AAVE_REPAY_WITH_ATOKENS = 0x2dad97d4;    // repayWithATokens(address,uint256,uint256)
 
     // Aave V3 WETHGateway function selectors — keccak256(signature)[:4]
     bytes4 constant SEL_AAVE_DEPOSIT_ETH = 0x474cf53d;         // depositETH(address,address,uint16)
-    bytes4 constant SEL_AAVE_WITHDRAW_ETH = 0x2e1a7d4d;        // withdrawETH(uint256,address,address)
+    bytes4 constant SEL_AAVE_WITHDRAW_ETH = 0x80500d20;        // withdrawETH(address,uint256,address)
 
     // Compound Comet function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Compound; anything else reverts.
     // Note: Comet uses asset type to distinguish between borrow/repay vs supply/withdraw
     bytes4 constant SEL_COMPOUND_SUPPLY = 0xf2b9fdb8;           // supply(address asset, uint256 amount)
     bytes4 constant SEL_COMPOUND_WITHDRAW = 0xf3fef3a3;         // withdraw(address asset, uint256 amount)
-    bytes4 constant SEL_COMPOUND_ABSORB = 0x5f8a20a9;           // absorb(address absorber, address[] calldata accounts)
+    bytes4 constant SEL_COMPOUND_ABSORB = 0xc3cecfd2;           // absorb(address,address[])
 
     // Morpho Blue function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Morpho; anything else reverts.
     // Note: Morpho Blue uses MarketParams struct as first argument, so selectors may differ
-    bytes4 constant SEL_MORPHO_SUPPLY = 0x9e8c3c24;           // supply(MarketParams,uint256,address,uint256)
-    bytes4 constant SEL_MORPHO_WITHDRAW = 0x7e26b4c4;          // withdraw(MarketParams,uint256,address,address)
-    bytes4 constant SEL_MORPHO_BORROW = 0xc5b7e5b8;            // borrow(MarketParams,uint256,address,address,uint256)
-    bytes4 constant SEL_MORPHO_REPAY = 0x8a3316e8;              // repay(MarketParams,uint256,address,address)
-    bytes4 constant SEL_MORPHO_LIQUIDATE = 0x9f2c5386;          // liquidate(MarketParams,address,uint256,address,address)
+    bytes4 constant SEL_MORPHO_SUPPLY = 0xa99aad89;           // supply((address,address,address,address,uint256),uint256,uint256,address,bytes)
+    bytes4 constant SEL_MORPHO_WITHDRAW = 0x5c2bea49;          // withdraw((address,address,address,address,uint256),uint256,uint256,address,address)
+    bytes4 constant SEL_MORPHO_BORROW = 0x50d8cd4b;            // borrow((address,address,address,address,uint256),uint256,uint256,address,address)
+    bytes4 constant SEL_MORPHO_REPAY = 0x20b76e81;              // repay((address,address,address,address,uint256),uint256,uint256,address,bytes)
+    bytes4 constant SEL_MORPHO_LIQUIDATE = 0xd8eabcb8;          // liquidate((address,address,address,address,uint256),address,uint256,uint256,bytes)
 
     event LoanEventProven(
         address indexed wallet,

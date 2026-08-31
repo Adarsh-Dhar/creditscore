@@ -17,8 +17,8 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
-import { JsonRpcProvider, Contract, Interface } from "ethers";
-import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE } from "./config";
+import { JsonRpcProvider, Contract, Interface, getAddress, isAddress, type Log, type Result } from "ethers";
+import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE, type ProtocolConfig, type ChainConfig } from "./config";
 import {
   extractWallet as extractAaveWallet,
   extractAssetAndAmount as extractAaveAssetAndAmount,
@@ -32,8 +32,198 @@ import {
   extractWallet as extractMorphoWallet,
   extractAssetAndAmount as extractMorphoAssetAndAmount,
 } from "./morphoDecoder";
-import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect } from "./store";
+import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent } from "./store";
 import type { IndexedEvent } from "@prisma/client";
+
+// Helper functions for single transaction indexing
+function checksum(addr: string | null | undefined): string | null | undefined {
+  if (!addr || !isAddress(addr)) return addr;
+  return getAddress(addr);
+}
+
+interface DecodedFields {
+  eventName: string;
+  wallet: string | null | undefined;
+  asset: string | null | undefined;
+  amount: string | null;
+}
+
+function decodeParsedLog(
+  eventName: string,
+  args: Result,
+  protocol: string,
+  chain: string
+): DecodedFields | null {
+  let wallet: string | null | undefined;
+  let asset: string | null | undefined;
+  let amount: string | null;
+
+  if (protocol === "aave") {
+    wallet = extractAaveWallet(eventName, args);
+    ({ asset, amount } = extractAaveAssetAndAmount(eventName, args));
+  } else if (protocol === "compound") {
+    wallet = extractCompoundWallet(eventName, args);
+    ({ asset, amount } = extractCompoundAssetAndAmount(eventName, args, chain));
+    eventName = classifyCompoundEvent(eventName, asset ?? null, chain);
+  } else if (protocol === "morpho") {
+    wallet = extractMorphoWallet(eventName, args);
+    ({ asset, amount } = extractMorphoAssetAndAmount(eventName, args));
+  } else {
+    return null;
+  }
+
+  const genericEventName = EVENT_NAME_MAP[protocol]?.[eventName] || eventName;
+  return {
+    eventName: genericEventName,
+    wallet: checksum(wallet),
+    asset: asset && isAddress(asset) ? checksum(asset) : asset,
+    amount: amount != null ? String(amount) : null,
+  };
+}
+
+function resolveProtocolConfig(
+  chain: string,
+  protocol: string
+): { chainConfig: ChainConfig; protocolConfig: ProtocolConfig } {
+  const chainConfig = CHAINS.find((c) => c.name === chain);
+  if (!chainConfig) {
+    throw new Error(`Unknown chain: ${chain}`);
+  }
+  const protocolConfig = chainConfig.protocols.find((p) => p.id === protocol);
+  if (!protocolConfig) {
+    throw new Error(`Protocol ${protocol} is not configured for chain ${chain}`);
+  }
+  return { chainConfig, protocolConfig };
+}
+
+function parseAndDecodeLog(
+  log: Log,
+  protocol: string,
+  protocolConfig: ProtocolConfig,
+  chain: string
+): DecodedFields | null {
+  const poolIface = new Interface(protocolConfig.abi);
+  const gatewayIface =
+    protocol === "aave" && protocolConfig.wethGatewayAbi
+      ? new Interface(protocolConfig.wethGatewayAbi)
+      : null;
+
+  let parsed;
+  try {
+    parsed = poolIface.parseLog(log);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed && gatewayIface) {
+    try {
+      parsed = gatewayIface.parseLog(log);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!parsed) return null;
+
+  return decodeParsedLog(parsed.name, parsed.args, protocol, chain);
+}
+
+export interface IndexSingleTxParams {
+  txHash: string;
+  chain: string;
+  protocol: string;
+  sourceRpc: string;
+  expectedWallet?: string;
+  eventName?: string;
+  proven?: boolean;
+}
+
+export async function indexSingleTx({
+  txHash,
+  chain,
+  protocol,
+  sourceRpc,
+  expectedWallet,
+  eventName,
+  proven = true,
+}: IndexSingleTxParams) {
+  const { protocolConfig } = resolveProtocolConfig(chain, protocol);
+  const poolAddress = protocolConfig.poolAddress;
+  const gatewayAddress = protocolConfig.wethGatewayAddress;
+
+  if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") {
+    throw new Error(`No pool address configured for ${protocol} on ${chain}`);
+  }
+
+  const validTargets = [poolAddress, gatewayAddress]
+    .filter((a): a is string => !!a && a !== "0x0000000000000000000000000000000000000000")
+    .map((a) => a.toLowerCase());
+
+  const provider = new JsonRpcProvider(sourceRpc);
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) {
+    throw new Error(`Transaction not found on ${chain}: ${txHash}`);
+  }
+  if (!tx.to || !validTargets.includes(tx.to.toLowerCase())) {
+    console.warn(
+      `  ! ${txHash} was not sent to ${protocol} on ${chain} (to=${tx.to}); skipping DB backfill.`
+    );
+    return null;
+  }
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) {
+    throw new Error(`Receipt not found on ${chain}: ${txHash}`);
+  }
+
+  const block = await provider.getBlock(receipt.blockNumber);
+  const timestamp = block?.timestamp ?? null;
+  const expected = expectedWallet ? checksum(expectedWallet) : null;
+
+  const decoded: NewIndexedEvent[] = [];
+  for (const log of receipt.logs) {
+    if (!validTargets.includes(log.address.toLowerCase())) continue;
+    const fields = parseAndDecodeLog(log, protocol, protocolConfig, chain);
+    if (!fields || !fields.wallet) continue;
+    decoded.push({
+      txHash: receipt.hash,
+      logIndex: log.index,
+      blockNumber: receipt.blockNumber,
+      eventName: fields.eventName,
+      wallet: fields.wallet,
+      asset: fields.asset ?? null,
+      amount: fields.amount ?? "0",
+      chain,
+      protocol,
+      timestamp,
+      proven,
+    });
+  }
+
+  let candidates = decoded;
+  if (expected) {
+    candidates = decoded.filter((e) => e.wallet.toLowerCase() === expected.toLowerCase());
+    if (candidates.length === 0) {
+      console.warn(
+        `  ! no ${protocol} log in ${txHash} matched TARGET_WALLET ${expected}; not writing a mismatched IndexedEvent.`
+      );
+      return null;
+    }
+  }
+
+  if (eventName) {
+    const named = candidates.filter((e) => e.eventName === eventName);
+    if (named.length > 0) candidates = named;
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  let last = null;
+  for (const row of candidates) {
+    last = await upsertEvent(row);
+  }
+  return last;
+}
 
 // Retry configuration for RPC rate limiting
 const MAX_RETRIES = 5;
@@ -247,31 +437,8 @@ async function main(): Promise<void> {
                   }
 
                   // Extract wallet, asset, and amount from event
-                  let wallet: string | null | undefined;
-                  let asset: string | null | undefined;
-                  let amount: string | null;
-                  if (protocol === "aave") {
-                    wallet = extractAaveWallet(eventName, parsed.args);
-                    ({ asset, amount } = extractAaveAssetAndAmount(eventName, parsed.args));
-                  } else if (protocol === "compound") {
-                    wallet = extractCompoundWallet(eventName, parsed.args);
-                    ({ asset, amount } = extractCompoundAssetAndAmount(eventName, parsed.args, chain));
-                    // Classify Compound event based on asset type
-                    const classifiedEventName = classifyCompoundEvent(eventName, asset ?? null, chain);
-                    // Use the classified event name for further processing
-                    eventName = classifiedEventName;
-                  } else if (protocol === "morpho") {
-                    wallet = extractMorphoWallet(eventName, parsed.args);
-                    ({ asset, amount } = extractMorphoAssetAndAmount(eventName, parsed.args));
-                  } else {
-                    console.error(`Unknown protocol: ${protocol}`);
-                    continue;
-                  }
-
-                  if (!wallet) continue;
-
-                  // Map protocol-specific event name to generic event name
-                  const genericEventName = EVENT_NAME_MAP[protocol]?.[eventName] || eventName;
+                  const decoded = decodeParsedLog(eventName, parsed.args, protocol, chain);
+                  if (!decoded || !decoded.wallet) continue;
 
                   // Get block timestamp (cached per block number)
                   let timestamp: number;
@@ -290,10 +457,10 @@ async function main(): Promise<void> {
                     txHash: log.transactionHash,
                     logIndex: log.index,
                     blockNumber: log.blockNumber,
-                    eventName: genericEventName,
-                    wallet,
-                    asset: asset ?? null,
-                    amount: amount ?? "0",
+                    eventName: decoded.eventName,
+                    wallet: decoded.wallet,
+                    asset: decoded.asset ?? null,
+                    amount: decoded.amount ?? "0",
                     chain, // Use the chain name from config
                     protocol, // Add protocol field
                     timestamp,
@@ -363,7 +530,9 @@ function printSummary(eventStore: IndexedEvent[]): void {
   );
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
