@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
 import prisma from "../db";
-import { getScore } from "../chain";
 import type { Prisma } from "@prisma/client";
 
 // Map DB eventName -> the stats bucket it belongs to
@@ -11,6 +10,14 @@ const EVENT_TO_STAT_KEY: Record<string, string> = {
   Repay: "repayCount",
   Withdraw: "withdrawCount",
   LiquidationCall: "liquidationCount",
+};
+
+const EVENT_WEIGHTS: Record<string, number> = {
+  Supply: 5,
+  Borrow: 2,
+  Repay: 15,
+  Withdraw: 0,
+  LiquidationCall: -20,
 };
 
 async function getStatsFromDb(wallet: string) {
@@ -102,8 +109,7 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     const checksummedAddress = ethers.getAddress(address);
 
     // Get on-chain data in parallel
-    const [score, stats, unprovenCount] = await Promise.all([
-      getScore(checksummedAddress).catch(() => "0"),
+    const [stats, unprovenCount] = await Promise.all([
       getStatsFromDb(checksummedAddress),
       prisma.indexedEvent
         .count({
@@ -114,6 +120,14 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
         })
         .catch(() => 0),
     ]);
+
+    const score = (
+      parseInt(stats.supplyCount) * EVENT_WEIGHTS.Supply +
+      parseInt(stats.borrowCount) * EVENT_WEIGHTS.Borrow +
+      parseInt(stats.repayCount) * EVENT_WEIGHTS.Repay +
+      parseInt(stats.withdrawCount) * EVENT_WEIGHTS.Withdraw +
+      parseInt(stats.liquidationCount) * EVENT_WEIGHTS.LiquidationCall
+    ).toString();
 
     // Get last event timestamp
     const lastEvent = await prisma.indexedEvent.findFirst({

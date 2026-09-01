@@ -5,7 +5,8 @@ import { AlertCircle, Loader2 } from 'lucide-react'
 export function ScoreRing({ score, maxScore }: { score: number; maxScore: number }) {
   const radius = 78
   const circumference = 2 * Math.PI * radius
-  const progress = circumference - (score / Math.max(maxScore, score)) * circumference
+  const effectiveMax = Math.max(maxScore, 1) // Prevent division by zero
+  const progress = circumference - (score / effectiveMax) * circumference
 
   return (
     <div className="score-ring" aria-label={`Credit score ${score}`}>
