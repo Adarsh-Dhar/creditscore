@@ -1,11 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
-import { Activity, ArrowUpRight, BarChart3, Copy, ExternalLink, RefreshCw, Trophy, Wallet } from 'lucide-react'
+import { Activity, ArrowUpRight, BarChart3, Check, Copy, ExternalLink, RefreshCw, Trophy, Wallet } from 'lucide-react'
 import { useAppData } from '../lib/app-data'
 import { EmptyState, ErrorBanner, LoadingSpinner, ScoreRing } from '../components/shared'
 
 export default function OverviewPage() {
+  const [copied, setCopied] = useState(false)
+
   const {
     currentAddress,
     summary,
@@ -23,6 +26,26 @@ export default function OverviewPage() {
     protocolColors,
     getTxExplorerUrl,
   } = useAppData()
+
+  const handleCopyAddress = async () => {
+    if (!currentAddress) return
+    
+    try {
+      await navigator.clipboard.writeText(currentAddress)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea')
+      textArea.value = currentAddress
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
 
   if (!currentAddress) {
     return (
@@ -84,8 +107,12 @@ export default function OverviewPage() {
               <p className="eyebrow">Wallet</p>
               <h2>Identity overview</h2>
             </div>
-            <button className="copy-button" aria-label="Copy wallet address" onClick={() => navigator.clipboard?.writeText(currentAddress)}>
-              <Copy size={15} />
+            <button 
+              className="copy-button" 
+              aria-label={copied ? "Address copied" : "Copy wallet address"} 
+              onClick={handleCopyAddress}
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
             </button>
           </div>
           <div className="wallet-address">

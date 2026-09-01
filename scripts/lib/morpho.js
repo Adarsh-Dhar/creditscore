@@ -1,14 +1,22 @@
 /**
  * morpho.js
  *
- * Script to perform direct Morpho Blue transactions on Sepolia.
- * This calls Morpho Blue functions directly (not through bundlers).
+ * Script to perform various Morpho Blue transactions.
+ * Supports: supply, borrow, repay, withdraw, add-collateral, remove-collateral
+ * This will create new events that can be indexed and proven for credit scoring.
  *
  * IMPORTANT: Morpho Blue does not currently have any deployed markets on Sepolia.
  * The Morpho API (https://api.morpho.org) only supports mainnet, base, and other chains,
  * but not Sepolia (chainId 11155111). Without existing markets, direct calls will fail.
  *
- * Usage: node scripts/lib/morpho.js
+ * Usage:
+ *   npm run morpho               # supply (default)
+ *   npm run morpho supply
+ *   npm run morpho borrow
+ *   npm run morpho repay
+ *   npm run morpho withdraw
+ *   npm run morpho add-collateral
+ *   npm run morpho remove-collateral
  */
 
 require("dotenv").config();
@@ -29,13 +37,24 @@ async function main() {
     process.exit(1);
   }
 
+  // Get operation type from command line argument
+  const operation = process.argv[2] || 'supply';
+  const validOperations = ['supply', 'borrow', 'repay', 'withdraw', 'add-collateral', 'remove-collateral'];
+  
+  if (!validOperations.includes(operation)) {
+    console.error(`Invalid operation: ${operation}`);
+    console.error(`Valid operations: ${validOperations.join(', ')}`);
+    process.exit(1);
+  }
+
   // Morpho Blue singleton on Sepolia (CREATE2 address)
   const MORPHO_ADDRESS = MORPHO_BLUE_SEPOLIA_ADDRESS || "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
 
-  console.log("⚠️  Morpho Blue on Sepolia - Market Availability Check");
+  console.log(`Performing ${operation} transaction to Morpho Blue...`);
   console.log(`  Morpho Blue: ${MORPHO_ADDRESS}`);
   console.log(`  Chain: Sepolia (chainId: 11155111)`);
 
+  console.log("\n⚠️  Morpho Blue on Sepolia - Market Availability Check");
   console.log("\n📋 Status:");
   console.log("  ❌ No Morpho Blue markets exist on Sepolia");
   console.log("  ❌ Morpho API does not support Sepolia (chainId 11155111)");

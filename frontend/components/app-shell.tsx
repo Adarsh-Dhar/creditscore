@@ -88,9 +88,6 @@ function ShellInner({ children }: { children: ReactNode }) {
               )}
             </Link>
           ))}
-          <p className="nav-label nav-label-spaced">Manage</p>
-          <button className="nav-item" disabled title="Coming soon"><Settings2 size={18} /> Settings</button>
-          <button className="nav-item" disabled title="Coming soon"><CircleHelp size={18} /> Help center</button>
         </nav>
       </aside>
 

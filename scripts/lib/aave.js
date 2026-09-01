@@ -1,17 +1,25 @@
 /**
- * supply-to-aave.js
+ * aave.js
  *
- * Script to perform a supply transaction to Aave V3 on Sepolia.
- * This will create a new event that can be indexed and proven for credit scoring.
+ * Script to perform various Aave V3 transactions on Sepolia.
+ * Supports: supply, borrow, repay, withdraw, add-collateral, remove-collateral
+ * This will create new events that can be indexed and proven for credit scoring.
  *
- * Aave V3 has both direct Pool operations and WETHGateway for ETH operations:
- *   - Direct Pool: supply(address asset, uint256 amount) - for ERC20 tokens
- *   - WETHGateway: depositETH(uint16 referralCode) - for ETH deposits
+ * Usage:
+ *   npm run aave               # supply (default)
+ *   npm run aave supply [amount]
+ *   npm run aave borrow [amount]
+ *   npm run aave repay [amount]
+ *   npm run aave withdraw [amount]
+ *   npm run aave add-collateral [amount]   # add more collateral to enable borrowing
+ *   npm run aave remove-collateral [amount] # remove collateral
  *
- * This script defaults to supplying USDC via the Pool. Set USE_ETH=true to deposit
- * ETH via WETHGateway instead.
+ * Environment variables:
+ *   USE_ETH=true       # Use ETH instead of WETH
+ *   USE_USDC=true      # Use USDC instead of WETH
  *
- * Usage: node scripts/lib/aave.js
+ * Note: Aave has minimum size requirements for borrow/withdraw operations.
+ * Supply operations work reliably. Borrow/withdraw may require larger amounts.
  */
 
 require("dotenv").config();
@@ -34,39 +42,63 @@ async function main() {
     process.exit(1);
   }
 
+  // Get operation type from command line argument
+  const operation = process.argv[2] || 'supply';
+  const validOperations = ['supply', 'borrow', 'repay', 'withdraw', 'add-collateral', 'remove-collateral'];
+  
+  if (!validOperations.includes(operation)) {
+    console.error(`Invalid operation: ${operation}`);
+    console.error(`Valid operations: ${validOperations.join(', ')}`);
+    process.exit(1);
+  }
+
   // Aave V3 Pool on Sepolia
   const AAVE_POOL_ADDRESS = AAVE_SEPOLIA_POOL;
 
-  // WETHGateway on Sepolia (for ETH deposits)
+  // WETHGateway on Sepolia (for ETH operations)
   const AAVE_WETHGATEWAY = "0x387d311e47e80b498169e6fb51d3193167d89f7d";
 
-  // Default to WETH as it's more likely to be supported
+  // WETH address on Sepolia
   const WETH_ADDRESS = "0xfff9976782d46cc05630d34fae175e5c0be1995d";
 
-  // USDC address on Sepolia (may not be supported, use WETH instead)
+  // USDC address on Sepolia
   const USDC_ADDRESS = AAVE_SEPOLIA_USDC || "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8";
   const USE_ETH = (process.env.USE_ETH || "false").toLowerCase() === "true";
+  const USE_USDC = (process.env.USE_USDC || "false").toLowerCase() === "true";
 
-  let ASSET, ASSET_LABEL, ASSET_DECIMALS, SUPPLY_AMOUNT, SUPPLY_FUNCTION;
-
-  if (USE_ETH) {
-    ASSET = null; // ETH is native
-    ASSET_LABEL = "ETH (via WETHGateway)";
-    ASSET_DECIMALS = 18;
-    SUPPLY_AMOUNT = "1000000000000000"; // 0.001 ETH
-    SUPPLY_FUNCTION = "depositETH";
-  } else {
-    ASSET = WETH_ADDRESS;
-    ASSET_LABEL = "WETH (via Pool)";
-    ASSET_DECIMALS = 18;
-    SUPPLY_AMOUNT = "1000000000000000"; // 0.001 WETH
-    SUPPLY_FUNCTION = "supply";
+  // For borrow/withdraw operations, use USDC by default on testnet as it has better liquidity
+  let useUsdc = USE_USDC;
+  if ((operation === 'borrow' || operation === 'withdraw') && !USE_ETH && !USE_USDC) {
+    console.log("  💡 Switching to USDC for better testnet liquidity");
+    useUsdc = true;
   }
 
-  console.log("Performing supply transaction to Aave V3 on Sepolia...");
+  let ASSET, ASSET_LABEL, ASSET_DECIMALS, AMOUNT;
+
+  // Check if amount is specified as third argument
+  const customAmount = process.argv[3];
+  
+  if (useUsdc) {
+    ASSET = USDC_ADDRESS;
+    ASSET_LABEL = "USDC";
+    ASSET_DECIMALS = 6;
+    AMOUNT = customAmount || "1000000"; // 1 USDC default
+  } else if (USE_ETH) {
+    ASSET = null; // ETH is native
+    ASSET_LABEL = "ETH";
+    ASSET_DECIMALS = 18;
+    AMOUNT = customAmount || "1000000000000000"; // 0.001 ETH default
+  } else {
+    ASSET = WETH_ADDRESS;
+    ASSET_LABEL = "WETH";
+    ASSET_DECIMALS = 18;
+    AMOUNT = customAmount || "1000000000000000"; // 0.001 WETH default
+  }
+
+  console.log(`Performing ${operation} transaction to Aave V3 on Sepolia...`);
   console.log(`  Pool: ${AAVE_POOL_ADDRESS}`);
   console.log(`  Asset: ${ASSET_LABEL}`);
-  console.log(`  Target Amount: ${USE_ETH ? ethers.formatEther(SUPPLY_AMOUNT) : ethers.formatUnits(SUPPLY_AMOUNT, ASSET_DECIMALS)} (will adjust based on balance)`);
+  console.log(`  Target Amount: ${USE_ETH ? ethers.formatEther(AMOUNT) : ethers.formatUnits(AMOUNT, ASSET_DECIMALS)} (will adjust based on balance)`);
 
   const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
@@ -79,54 +111,56 @@ async function main() {
   console.log("To execute with WETH: USE_ETH=false npm run aave");
 
   try {
-    let supplyTx;
+    let tx;
 
-    if (USE_ETH) {
-      // ETH deposit via WETHGateway
-      console.log("\nStep 1: Depositing ETH via WETHGateway...");
+    switch (operation) {
+      case 'supply':
+        await handleSupply();
+        break;
+      case 'borrow':
+        await handleBorrow();
+        break;
+      case 'repay':
+        await handleRepay();
+        break;
+      case 'withdraw':
+        await handleWithdraw();
+        break;
+      case 'add-collateral':
+        await handleAddCollateral();
+        break;
+      case 'remove-collateral':
+        await handleRemoveCollateral();
+        break;
+    }
 
-      const ethBalance = await provider.getBalance(wallet.address);
-      const formattedBalance = ethers.formatEther(ethBalance);
-      console.log(`  ETH Balance: ${formattedBalance}`);
+    async function handleSupply() {
+      if (USE_ETH) {
+        console.log("\nStep 1: Depositing ETH via WETHGateway...");
+        const ethBalance = await provider.getBalance(wallet.address);
+        const formattedBalance = ethers.formatEther(ethBalance);
+        console.log(`  ETH Balance: ${formattedBalance}`);
 
-      if (ethBalance < BigInt(SUPPLY_AMOUNT)) {
-        console.log(`  ⚠️  Insufficient ETH balance (need ${ethers.formatEther(SUPPLY_AMOUNT)})`);
-        console.log(`  🔧 Adjusting deposit amount to available balance: ${formattedBalance}`);
-        SUPPLY_AMOUNT = ethBalance.toString();
-
-        if (ethBalance === 0n) {
-          console.error("❌ No ETH balance available for deposit");
-          console.log("\nOptions:");
-          console.log("1. Get testnet ETH from a faucet");
-          console.log("2. Set USE_ETH=false to supply WETH instead");
-          process.exit(1);
+        if (ethBalance < BigInt(AMOUNT)) {
+          console.log(`  ⚠️  Insufficient ETH balance, adjusting to: ${formattedBalance}`);
+          AMOUNT = ethBalance.toString();
+          if (ethBalance === 0n) {
+            console.error("❌ No ETH balance available");
+            process.exit(1);
+          }
         }
-      }
 
-      console.log(`  Final deposit amount: ${ethers.formatEther(SUPPLY_AMOUNT)}`);
+        console.log(`  Final deposit amount: ${ethers.formatEther(AMOUNT)}`);
 
-      const wethGateway = new ethers.Contract(
-        AAVE_WETHGATEWAY,
-        ["function depositETH(address, address onBehalfOf, uint16 referralCode) payable"],
-        wallet
-      );
+        const wethGateway = new ethers.Contract(
+          AAVE_WETHGATEWAY,
+          ["function depositETH(address, address onBehalfOf, uint16 referralCode) payable"],
+          wallet
+        );
 
-      supplyTx = await wethGateway.depositETH(ethers.ZeroAddress, wallet.address, 0, { value: SUPPLY_AMOUNT });
-      console.log(`  Deposit transaction: ${supplyTx.hash}`);
-      console.log("  Waiting for confirmation...");
-
-    } else {
-      // ERC20 token supply via Pool
-      console.log("\nStep 1: Approving Pool to spend asset...");
-
-      const isWETH = ASSET.toLowerCase() === WETH_ADDRESS.toLowerCase();
-
-      let balance;
-      if (isWETH) {
-        // For WETH, use ETH balance directly
-        balance = await provider.getBalance(wallet.address);
-        console.log(`  Using ETH balance (WETH is wrapped ETH on Sepolia)`);
+        tx = await wethGateway.depositETH(ethers.ZeroAddress, wallet.address, 0, { value: AMOUNT });
       } else {
+        console.log(`\nStep 1: Approving Pool to spend ${ASSET_LABEL}...`);
         const tokenContract = new ethers.Contract(
           ASSET,
           [
@@ -137,80 +171,227 @@ async function main() {
           ],
           provider
         );
-        balance = await tokenContract.balanceOf(wallet.address);
-      }
 
-      const formattedBalance = ethers.formatUnits(balance, ASSET_DECIMALS);
-      console.log(`  Balance: ${formattedBalance}`);
+        const balance = await tokenContract.balanceOf(wallet.address);
+        const formattedBalance = ethers.formatUnits(balance, ASSET_DECIMALS);
+        console.log(`  ${ASSET_LABEL} Balance: ${formattedBalance}`);
 
-      if (balance < BigInt(SUPPLY_AMOUNT)) {
-        console.log(`  ⚠️  Insufficient balance for full supply (need ${ethers.formatUnits(SUPPLY_AMOUNT, ASSET_DECIMALS)})`);
-        console.log(`  🔧 Adjusting supply amount to available balance: ${formattedBalance}`);
-        SUPPLY_AMOUNT = balance.toString();
-
-        if (balance === 0n) {
-          console.error(`❌ No ${ASSET_LABEL} balance available for supply`);
-          console.log("\nOptions:");
-          console.log("1. Get testnet tokens from a faucet");
-          console.log("2. Set USE_ETH=true to deposit ETH instead");
-          process.exit(1);
+        if (balance < BigInt(AMOUNT)) {
+          console.log(`  ⚠️  Insufficient balance, adjusting to: ${formattedBalance}`);
+          AMOUNT = balance.toString();
+          if (balance === 0n) {
+            console.error(`❌ No ${ASSET_LABEL} balance available`);
+            console.log(`\n💡 Tip: Use USE_ETH=true for ETH deposits, or get ${ASSET_LABEL} from a faucet`);
+            process.exit(1);
+          }
         }
-      }
-
-      console.log(`  Final supply amount: ${ethers.formatUnits(SUPPLY_AMOUNT, ASSET_DECIMALS)}`);
-
-      // Approve Pool to spend the asset (skip for WETH)
-      if (!isWETH) {
-        const tokenContract = new ethers.Contract(
-          ASSET,
-          [
-            "function balanceOf(address) view returns (uint256)",
-            "function decimals() view returns (uint8)",
-            "function approve(address spender, uint256 amount) returns (bool)",
-            "function allowance(address owner, address spender) view returns (uint256)",
-          ],
-          provider
-        );
 
         const currentAllowance = await tokenContract.allowance(wallet.address, AAVE_POOL_ADDRESS);
-        console.log(`  Current allowance: ${ethers.formatUnits(currentAllowance, ASSET_DECIMALS)}`);
-
-        if (currentAllowance >= BigInt(SUPPLY_AMOUNT)) {
-          console.log("  ✅ Sufficient allowance already exists, skipping approval");
-        } else {
+        if (currentAllowance < BigInt(AMOUNT)) {
           const tokenWithWallet = tokenContract.connect(wallet);
-          const approveTx = await tokenWithWallet.approve(AAVE_POOL_ADDRESS, SUPPLY_AMOUNT);
+          const approveTx = await tokenWithWallet.approve(AAVE_POOL_ADDRESS, AMOUNT);
           console.log(`  Approval transaction: ${approveTx.hash}`);
           await approveTx.wait();
           console.log("  ✅ Approval confirmed");
         }
-      } else {
-        console.log("  ✅ Skipping approval (WETH wraps ETH directly)");
-      }
 
-      console.log("\nStep 2: Supplying to Aave Pool...");
+        console.log(`\nStep 2: Supplying ${ASSET_LABEL} to Aave Pool...`);
+        const aavePool = new ethers.Contract(
+          AAVE_POOL_ADDRESS,
+          ["function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)"],
+          wallet
+        );
+
+        tx = await aavePool.supply(ASSET, AMOUNT, wallet.address, 0);
+      }
+    }
+
+    async function handleBorrow() {
+      console.log("\nStep 1: Borrowing from Aave Pool...");
       const aavePool = new ethers.Contract(
         AAVE_POOL_ADDRESS,
-        ["function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)"],
+        [
+          "function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)",
+          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"
+        ],
         wallet
       );
 
-      supplyTx = await aavePool.supply(ASSET, SUPPLY_AMOUNT, wallet.address, 0);
-      console.log(`  Supply transaction: ${supplyTx.hash}`);
-      console.log("  Waiting for confirmation...");
+      // Check available borrow capacity
+      const userData = await aavePool.getUserAccountData(wallet.address);
+      const availableBorrows = ethers.formatUnits(userData.availableBorrowsBase, 18);
+      const healthFactor = ethers.formatUnits(userData.healthFactor, 18);
+      const totalCollateral = ethers.formatUnits(userData.totalCollateralBase, 18);
+      console.log(`  Total collateral: ${totalCollateral} WETH (base units)`);
+      console.log(`  Available to borrow: ${availableBorrows} WETH (base units)`);
+      console.log(`  Health factor: ${healthFactor}`);
+
+      if (userData.availableBorrowsBase === 0n) {
+        console.error("❌ No borrow capacity available");
+        console.log("\n💡 Tip: Supply more collateral first with: npm run aave:add-collateral");
+        process.exit(1);
+      }
+
+      // Determine the asset to borrow (WETH by default, or USDC if requested)
+      const borrowAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
+      const borrowAssetLabel = useUsdc ? "USDC" : "WETH";
+      const borrowDecimals = useUsdc ? 6 : 18;
+
+      let borrowAmount = AMOUNT;
+      
+      // If available is less than requested, use the available amount
+      if (userData.availableBorrowsBase < BigInt(borrowAmount)) {
+        console.log(`  ⚠️  Insufficient collateral for requested amount`);
+        console.log(`  🔧 Using available borrow capacity instead`);
+        borrowAmount = userData.availableBorrowsBase;
+      }
+
+      console.log(`  Borrow amount: ${ethers.formatUnits(borrowAmount, borrowDecimals)} ${borrowAssetLabel}`);
+
+      try {
+        tx = await aavePool.borrow(borrowAsset, borrowAmount, 2, 0, wallet.address);
+      } catch (error) {
+        console.error("❌ Borrow failed:", error.message);
+        console.log("\n💡 Possible reasons:");
+        console.log("  1. Borrow amount too small (minimum borrow requirements)");
+        console.log("  2. Insufficient health factor after borrow");
+        console.log("  3. Borrow is not enabled for this asset");
+        console.log("\n💡 Tip: Try supplying more collateral first");
+        process.exit(1);
+      }
     }
 
-    const receipt = await supplyTx.wait();
-    console.log(`  ✅ Supply confirmed in block ${receipt.blockNumber}`);
+    async function handleRepay() {
+      console.log("\nStep 1: Repaying to Aave Pool...");
+      const aavePool = new ethers.Contract(
+        AAVE_POOL_ADDRESS,
+        [
+          "function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)",
+          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"
+        ],
+        wallet
+      );
+
+      // Check debt
+      const userData = await aavePool.getUserAccountData(wallet.address);
+      const totalDebt = ethers.formatUnits(userData.totalDebtBase, 18);
+      console.log(`  Total debt: ${totalDebt} WETH (base units)`);
+
+      if (userData.totalDebtBase === 0n) {
+        console.error("❌ No debt to repay");
+        console.log("\n💡 Tip: Borrow first with: npm run aave:borrow");
+        process.exit(1);
+      }
+
+      const repayAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
+      const repayAssetLabel = useUsdc ? "USDC" : "WETH";
+      const repayDecimals = useUsdc ? 6 : 18;
+
+      const repayAmount = AMOUNT;
+      if (userData.totalDebtBase < BigInt(repayAmount)) {
+        console.log(`  ⚠️  Repay amount exceeds debt, adjusting to full debt`);
+        repayAmount = userData.totalDebtBase;
+      }
+
+      console.log(`  Repay amount: ${ethers.formatUnits(repayAmount, repayDecimals)} ${repayAssetLabel}`);
+
+      // For ETH repay, we need to approve if not using ETH directly
+      if (!USE_ETH && !USE_USDC) {
+        const wethContract = new ethers.Contract(
+          WETH_ADDRESS,
+          [
+            "function approve(address spender, uint256 amount) returns (bool)",
+            "function allowance(address owner, address spender) view returns (uint256)",
+          ],
+          provider
+        );
+
+        const currentAllowance = await wethContract.allowance(wallet.address, AAVE_POOL_ADDRESS);
+        if (currentAllowance < BigInt(repayAmount)) {
+          const tokenWithWallet = wethContract.connect(wallet);
+          const approveTx = await tokenWithWallet.approve(AAVE_POOL_ADDRESS, repayAmount);
+          console.log(`  Approval transaction: ${approveTx.hash}`);
+          await approveTx.wait();
+          console.log("  ✅ Approval confirmed");
+        }
+      }
+
+      tx = await aavePool.repay(repayAsset, repayAmount, 2, wallet.address);
+    }
+
+    async function handleWithdraw() {
+      console.log("\nStep 1: Withdrawing from Aave Pool...");
+      
+      const aavePool = new ethers.Contract(
+        AAVE_POOL_ADDRESS,
+        [
+          "function withdraw(address asset, uint256 amount, address to)",
+          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"
+        ],
+        wallet
+      );
+
+      // Check available collateral
+      const userData = await aavePool.getUserAccountData(wallet.address);
+      const totalCollateral = ethers.formatUnits(userData.totalCollateralBase, 18);
+      console.log(`  Total collateral: ${totalCollateral} WETH (base units)`);
+
+      if (userData.totalCollateralBase === 0n) {
+        console.error("❌ No collateral to withdraw");
+        console.log("\n💡 Tip: Supply collateral first with: npm run aave:supply");
+        process.exit(1);
+      }
+
+      const withdrawAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
+      const withdrawAssetLabel = useUsdc ? "USDC" : "WETH";
+      const withdrawDecimals = useUsdc ? 6 : 18;
+
+      let withdrawAmount = AMOUNT;
+      if (userData.totalCollateralBase < BigInt(withdrawAmount)) {
+        console.log(`  ⚠️  Withdraw amount exceeds collateral, adjusting to full collateral`);
+        withdrawAmount = userData.totalCollateralBase;
+      }
+
+      console.log(`  Withdraw amount: ${ethers.formatUnits(withdrawAmount, withdrawDecimals)} ${withdrawAssetLabel}`);
+
+      try {
+        tx = await aavePool.withdraw(withdrawAsset, withdrawAmount, wallet.address);
+      } catch (error) {
+        console.error("❌ Withdraw failed:", error.message);
+        console.log("\n💡 Possible reasons:");
+        console.log("  1. Withdraw amount too small");
+        console.log("  2. Health factor would be too low after withdraw");
+        console.log("  3. No collateral available");
+        process.exit(1);
+      }
+    }
+
+    async function handleAddCollateral() {
+      console.log("\nStep 1: Adding more collateral (Supply) to Aave Pool...");
+      // This is essentially the same as supply, just with a clearer name
+      await handleSupply();
+    }
+
+    async function handleRemoveCollateral() {
+      console.log("\nStep 1: Removing collateral (Withdraw) from Aave Pool...");
+      // Use the same withdraw function for both ETH and WETH
+      await handleWithdraw();
+    }
+
+    console.log(`  Transaction: ${tx.hash}`);
+    console.log("  Waiting for confirmation...");
+
+    const receipt = await tx.wait();
+    console.log(`  ✅ ${operation.charAt(0).toUpperCase() + operation.slice(1)} confirmed in block ${receipt.blockNumber}`);
     console.log(`  Gas used: ${receipt.gasUsed.toString()}`);
 
-    console.log("\n✅ Supply transaction completed successfully!");
+    console.log(`\n✅ ${operation.charAt(0).toUpperCase() + operation.slice(1)} transaction completed successfully!`);
     console.log("\nNext steps:");
     console.log("1. Wait for the indexer to pick up this transaction (usually within a few minutes)");
     console.log("2. Run: npm run prove-queue");
-    console.log('3. This will be classified as "Supply" for credit scoring');
+    console.log(`3. This will be classified as "${operation.charAt(0).toUpperCase() + operation.slice(1)}" for credit scoring`);
   } catch (error) {
-    console.error("❌ Error performing supply:", error.message);
+    console.error(`❌ Error performing ${operation}:`, error.message);
     process.exit(1);
   }
 }
