@@ -58,8 +58,8 @@ async function main() {
   // WETHGateway on Sepolia (for ETH operations)
   const AAVE_WETHGATEWAY = "0x387d311e47e80b498169e6fb51d3193167d89f7d";
 
-  // WETH address on Sepolia
-  const WETH_ADDRESS = "0xfff9976782d46cc05630d34fae175e5c0be1995d";
+  // WETH address on Sepolia (from Aave address book)
+  const WETH_ADDRESS = "0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c";
 
   // USDC address on Sepolia
   const USDC_ADDRESS = AAVE_SEPOLIA_USDC || "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8";
@@ -219,11 +219,9 @@ async function main() {
 
       // Check available borrow capacity
       const userData = await aavePool.getUserAccountData(wallet.address);
-      const availableBorrows = ethers.formatUnits(userData.availableBorrowsBase, 18);
+      const availableBorrowsUSD = ethers.formatUnits(userData.availableBorrowsBase, 8); // Base currency is USD with 8 decimals
       const healthFactor = ethers.formatUnits(userData.healthFactor, 18);
-      const totalCollateral = ethers.formatUnits(userData.totalCollateralBase, 18);
-      console.log(`  Total collateral: ${totalCollateral} WETH (base units)`);
-      console.log(`  Available to borrow: ${availableBorrows} WETH (base units)`);
+      console.log(`  Available to borrow: $${availableBorrowsUSD} USD (base units)`);
       console.log(`  Health factor: ${healthFactor}`);
 
       if (userData.availableBorrowsBase === 0n) {
@@ -232,18 +230,25 @@ async function main() {
         process.exit(1);
       }
 
-      // Determine the asset to borrow (WETH by default, or USDC if requested)
-      const borrowAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
-      const borrowAssetLabel = useUsdc ? "USDC" : "WETH";
-      const borrowDecimals = useUsdc ? 6 : 18;
+      // Always use USDC for borrowing on testnet (better liquidity and minimum borrow amounts)
+      const borrowAsset = USDC_ADDRESS;
+      const borrowAssetLabel = "USDC";
+      const borrowDecimals = 6;
 
+      // Default to 1 USDC if no amount specified
       let borrowAmount = AMOUNT;
+      if (!customAmount) {
+        borrowAmount = "1000000"; // 1 USDC default
+      }
+
+      // For USDC, we need to convert the USD-based availableBorrowsBase to USDC amount
+      // Since both are USD-based, we can use availableBorrowsBase directly as a rough guide
+      // But we should use a reasonable minimum - let's use at least 1 USDC
+      const minBorrowAmount = BigInt("1000000"); // 1 USDC minimum
       
-      // If available is less than requested, use the available amount
-      if (userData.availableBorrowsBase < BigInt(borrowAmount)) {
-        console.log(`  ⚠️  Insufficient collateral for requested amount`);
-        console.log(`  🔧 Using available borrow capacity instead`);
-        borrowAmount = userData.availableBorrowsBase;
+      if (BigInt(borrowAmount) < minBorrowAmount) {
+        console.log(`  ⚠️  Borrow amount too small, adjusting to minimum 1 USDC`);
+        borrowAmount = minBorrowAmount.toString();
       }
 
       console.log(`  Borrow amount: ${ethers.formatUnits(borrowAmount, borrowDecimals)} ${borrowAssetLabel}`);
@@ -267,15 +272,16 @@ async function main() {
         AAVE_POOL_ADDRESS,
         [
           "function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)",
-          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"
+          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)",
+          "function getReserveData(address asset) view returns (tuple(uint256 configuration, uint128 liquidityIndex, uint128 currentLiquidityRate, uint128 variableBorrowIndex, uint128 currentVariableBorrowRate, uint128 currentStableBorrowRate, uint40 lastUpdateTimestamp, uint16 id, address aTokenAddress, address stableDebtTokenAddress, address variableDebtTokenAddress, address interestRateStrategyAddress, uint128 accruedToTreasury, uint128 unbacked, uint128 isolationModeTotalDebt))"
         ],
         wallet
       );
 
-      // Check debt
+      // Check debt (using USD-based totalDebtBase for display)
       const userData = await aavePool.getUserAccountData(wallet.address);
-      const totalDebt = ethers.formatUnits(userData.totalDebtBase, 18);
-      console.log(`  Total debt: ${totalDebt} WETH (base units)`);
+      const totalDebtUSD = ethers.formatUnits(userData.totalDebtBase, 8); // USD with 8 decimals
+      console.log(`  Total debt: $${totalDebtUSD} USD (base units)`);
 
       if (userData.totalDebtBase === 0n) {
         console.error("❌ No debt to repay");
@@ -283,37 +289,56 @@ async function main() {
         process.exit(1);
       }
 
-      const repayAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
-      const repayAssetLabel = useUsdc ? "USDC" : "WETH";
-      const repayDecimals = useUsdc ? 6 : 18;
+      // Always use USDC for repayment (matching what we borrowed)
+      const repayAsset = USDC_ADDRESS;
+      const repayAssetLabel = "USDC";
+      const repayDecimals = 6;
 
-      const repayAmount = AMOUNT;
-      if (userData.totalDebtBase < BigInt(repayAmount)) {
+      // Get the actual debt token balance
+      const reserveData = await aavePool.getReserveData(USDC_ADDRESS);
+      const variableDebtTokenAddress = reserveData.variableDebtTokenAddress;
+      
+      const debtToken = new ethers.Contract(
+        variableDebtTokenAddress,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+
+      const actualDebtRaw = await debtToken.balanceOf(wallet.address);
+      const actualDebt = ethers.formatUnits(actualDebtRaw, repayDecimals);
+      console.log(`  Actual USDC debt: ${actualDebt} USDC`);
+
+      // Default to 1 USDC if no amount specified
+      let repayAmount = AMOUNT;
+      if (!customAmount) {
+        repayAmount = "1000000"; // 1 USDC default
+      }
+
+      // If debt is less than requested, use the actual debt amount
+      if (actualDebtRaw < BigInt(repayAmount)) {
         console.log(`  ⚠️  Repay amount exceeds debt, adjusting to full debt`);
-        repayAmount = userData.totalDebtBase;
+        repayAmount = actualDebtRaw;
       }
 
       console.log(`  Repay amount: ${ethers.formatUnits(repayAmount, repayDecimals)} ${repayAssetLabel}`);
 
-      // For ETH repay, we need to approve if not using ETH directly
-      if (!USE_ETH && !USE_USDC) {
-        const wethContract = new ethers.Contract(
-          WETH_ADDRESS,
-          [
-            "function approve(address spender, uint256 amount) returns (bool)",
-            "function allowance(address owner, address spender) view returns (uint256)",
-          ],
-          provider
-        );
+      // Approve USDC spending
+      const usdcContract = new ethers.Contract(
+        USDC_ADDRESS,
+        [
+          "function approve(address spender, uint256 amount) returns (bool)",
+          "function allowance(address owner, address spender) view returns (uint256)",
+        ],
+        provider
+      );
 
-        const currentAllowance = await wethContract.allowance(wallet.address, AAVE_POOL_ADDRESS);
-        if (currentAllowance < BigInt(repayAmount)) {
-          const tokenWithWallet = wethContract.connect(wallet);
-          const approveTx = await tokenWithWallet.approve(AAVE_POOL_ADDRESS, repayAmount);
-          console.log(`  Approval transaction: ${approveTx.hash}`);
-          await approveTx.wait();
-          console.log("  ✅ Approval confirmed");
-        }
+      const currentAllowance = await usdcContract.allowance(wallet.address, AAVE_POOL_ADDRESS);
+      if (currentAllowance < BigInt(repayAmount)) {
+        const tokenWithWallet = usdcContract.connect(wallet);
+        const approveTx = await tokenWithWallet.approve(AAVE_POOL_ADDRESS, repayAmount);
+        console.log(`  Approval transaction: ${approveTx.hash}`);
+        await approveTx.wait();
+        console.log("  ✅ Approval confirmed");
       }
 
       tx = await aavePool.repay(repayAsset, repayAmount, 2, wallet.address);
@@ -326,33 +351,44 @@ async function main() {
         AAVE_POOL_ADDRESS,
         [
           "function withdraw(address asset, uint256 amount, address to)",
-          "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"
+          "function getReserveData(address asset) view returns (tuple(uint256 configuration, uint128 liquidityIndex, uint128 currentLiquidityRate, uint128 variableBorrowIndex, uint128 currentVariableBorrowRate, uint128 currentStableBorrowRate, uint40 lastUpdateTimestamp, uint16 id, address aTokenAddress, address stableDebtTokenAddress, address variableDebtTokenAddress, address interestRateStrategyAddress, uint128 accruedToTreasury, uint128 unbacked, uint128 isolationModeTotalDebt))"
         ],
         wallet
       );
 
-      // Check available collateral
-      const userData = await aavePool.getUserAccountData(wallet.address);
-      const totalCollateral = ethers.formatUnits(userData.totalCollateralBase, 18);
-      console.log(`  Total collateral: ${totalCollateral} WETH (base units)`);
+      // Get the aToken address for the asset we're withdrawing
+      const withdrawAsset = WETH_ADDRESS;
+      const withdrawAssetLabel = "WETH";
+      const withdrawDecimals = 18;
 
-      if (userData.totalCollateralBase === 0n) {
+      const reserveData = await aavePool.getReserveData(withdrawAsset);
+      const aTokenAddress = reserveData.aTokenAddress;
+
+      // Check actual aToken balance (real collateral amount)
+      const aToken = new ethers.Contract(
+        aTokenAddress,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+
+      const realCollateralRaw = await aToken.balanceOf(wallet.address);
+      const realCollateral = ethers.formatUnits(realCollateralRaw, withdrawDecimals);
+      console.log(`  Real collateral (aToken balance): ${realCollateral} ${withdrawAssetLabel}`);
+
+      if (realCollateralRaw === 0n) {
         console.error("❌ No collateral to withdraw");
         console.log("\n💡 Tip: Supply collateral first with: npm run aave:supply");
         process.exit(1);
       }
 
-      const withdrawAsset = useUsdc ? USDC_ADDRESS : WETH_ADDRESS;
-      const withdrawAssetLabel = useUsdc ? "USDC" : "WETH";
-      const withdrawDecimals = useUsdc ? 6 : 18;
-
       let withdrawAmount = AMOUNT;
-      if (userData.totalCollateralBase < BigInt(withdrawAmount)) {
+      if (realCollateralRaw < BigInt(withdrawAmount)) {
         console.log(`  ⚠️  Withdraw amount exceeds collateral, adjusting to full collateral`);
-        withdrawAmount = userData.totalCollateralBase;
+        withdrawAmount = realCollateralRaw;
       }
 
       console.log(`  Withdraw amount: ${ethers.formatUnits(withdrawAmount, withdrawDecimals)} ${withdrawAssetLabel}`);
+      console.log(`  Note: Withdrawing as WETH. You can unwrap to ETH afterwards if needed.`);
 
       try {
         tx = await aavePool.withdraw(withdrawAsset, withdrawAmount, wallet.address);
@@ -382,6 +418,15 @@ async function main() {
     console.log("  Waiting for confirmation...");
 
     const receipt = await tx.wait();
+    
+    if (receipt.status === 0) {
+      console.error(`❌ Transaction failed on-chain`);
+      console.error(`  Transaction hash: ${tx.hash}`);
+      console.error(`  Block: ${receipt.blockNumber}`);
+      console.error(`  Gas used: ${receipt.gasUsed.toString()}`);
+      process.exit(1);
+    }
+    
     console.log(`  ✅ ${operation.charAt(0).toUpperCase() + operation.slice(1)} confirmed in block ${receipt.blockNumber}`);
     console.log(`  Gas used: ${receipt.gasUsed.toString()}`);
 

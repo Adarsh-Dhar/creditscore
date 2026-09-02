@@ -96,6 +96,7 @@ contract CreditScoreMVP {
     // Aave V3 WETHGateway function selectors — keccak256(signature)[:4]
     bytes4 constant SEL_AAVE_DEPOSIT_ETH = 0x474cf53d;         // depositETH(address,address,uint16)
     bytes4 constant SEL_AAVE_WITHDRAW_ETH = 0x80500d20;        // withdrawETH(address,uint256,address)
+    bytes4 constant SEL_AAVE_WITHDRAW_ETH_WITH_PERMIT = 0xd4c40b6c; // withdrawETHWithPermit(address,uint256,address,uint256,uint256,uint8,bytes32,bytes32)
 
     // Compound Comet function selectors — keccak256(signature)[:4]. These are
     // the only actions this contract will ever credit for Compound; anything else reverts.
@@ -235,6 +236,7 @@ contract CreditScoreMVP {
             // WETHGateway selectors
             if (selector == SEL_AAVE_DEPOSIT_ETH) return EventType.Supply;
             if (selector == SEL_AAVE_WITHDRAW_ETH) return EventType.Withdraw;
+            if (selector == SEL_AAVE_WITHDRAW_ETH_WITH_PERMIT) return EventType.Withdraw;
             revert("unrecognized WETHGateway selector");
         }
         

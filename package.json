@@ -16,6 +16,7 @@
     "aave:withdraw": "node scripts/lib/aave.js withdraw",
     "aave:add-collateral": "node scripts/lib/aave.js add-collateral",
     "aave:remove-collateral": "node scripts/lib/aave.js remove-collateral",
+    "aave:check-collateral": "node scripts/lib/checkCollateral.js",
     "compound": "node scripts/lib/compound.js",
     "compound:supply": "node scripts/lib/compound.js supply",
     "compound:withdraw": "node scripts/lib/compound.js withdraw",

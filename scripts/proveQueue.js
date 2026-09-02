@@ -30,7 +30,7 @@ const { JsonRpcProvider, Wallet, Contract, keccak256, toUtf8Bytes } = require("e
 const { processBatch } = require("./lib/proveBatch");
 const { proveTransaction } = require("./lib/proveTransaction");
 const { EVENT_TYPE_INDEX } = require("./lib/eventTypes");
-const { loadUnprovenEvents, markProven, disconnect } = require("../indexer/src/store");
+const { loadUnprovenEvents, markProven, disconnect } = require("../indexer/dist/store");
 
 const BATCH_SIZE = Number(process.env.PROVE_BATCH_SIZE || 10);
 

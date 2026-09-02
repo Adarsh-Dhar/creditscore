@@ -70,6 +70,8 @@ interface AppDataContextValue {
   // activity filters
   eventPage: number
   setEventPage: Dispatch<SetStateAction<number>>
+  eventPageSize: number
+  setEventPageSize: Dispatch<SetStateAction<number>>
   eventFilter: string | null
   setEventFilter: Dispatch<SetStateAction<string | null>>
   protocolFilter: string | null
@@ -149,6 +151,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   })
 
   const [eventPage, setEventPage] = useState(1)
+  const [eventPageSize, setEventPageSize] = useState(10)
   const [eventFilter, setEventFilter] = useState<string | null>(null)
   const [protocolFilter, setProtocolFilter] = useState<string | null>(null)
   const [totalEvents, setTotalEvents] = useState(0)
@@ -206,7 +209,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     try {
       const [summaryRes, eventsRes] = await Promise.all([
         walletSummary(address),
-        walletEvents(address, { page: 1, limit: 50 }),
+        walletEvents(address, { page: 1, limit: eventPageSize }),
       ])
       setSummary(summaryRes)
       setEvents(eventsRes.events)
@@ -264,7 +267,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Load filtered events whenever page/filters/address change
+  // Reset page when page size changes
+  useEffect(() => {
+    setEventPage(1)
+  }, [eventPageSize])
+
+  // Load filtered events whenever page/filters/address/pageSize change
   useEffect(() => {
     if (!currentAddress) return
 
@@ -273,7 +281,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setErrors(prev => ({ ...prev, events: null }))
 
       try {
-        const params: any = { page: eventPage, limit: 50 }
+        const params: any = { page: eventPage, limit: eventPageSize }
         if (eventFilter) params.eventName = eventFilter
         if (protocolFilter) params.protocol = protocolFilter
 
@@ -288,7 +296,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
 
     loadFilteredEvents()
-  }, [eventPage, eventFilter, protocolFilter, currentAddress])
+  }, [eventPage, eventPageSize, eventFilter, protocolFilter, currentAddress])
 
   const handleSearch = () => {
     if (query.trim()) {
@@ -356,6 +364,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     eventPage,
     setEventPage,
+    eventPageSize,
+    setEventPageSize,
     eventFilter,
     setEventFilter,
     protocolFilter,

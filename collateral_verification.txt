@@ -1,0 +1,29 @@
+=== Aave Collateral Verification ===
+Wallet: 0xb8552ec41cd7b5697464602d24d9c174F6FB863C
+Pool: 0x6ae43d3271ff6888e7fc43fd7321a503ff738951
+Network: Sepolia
+
+1. Checking getUserAccountData (misleading totalCollateralBase):
+  totalCollateralBase (raw): 50131926644
+  totalDebtBase (raw): 0
+  availableBorrowsBase (raw): 35092348651
+  ❌ WRONG (formatted as 18 decimals): 0.000000050131926644 "WETH"
+
+2. Getting aToken address for WETH:
+  aToken address: 0x5b071b590a59395fE4025A0Ccc1FcC931AAc1830
+
+3. Checking actual aToken balance (REAL WETH collateral):
+  aToken balance (raw): 0
+  ✅ REAL WETH collateral: 0.0 WETH
+
+4. Comparison:
+  Misleading amount (from totalCollateralBase): 0.000000050131926644
+  Real collateral (from aToken balance): 0.0
+  Difference: -0.000000050131926644 WETH
+
+5. Wallet balances:
+  ETH: 0.182202668553337428
+  WETH: 1.796000000055312029
+
+6. Conclusion:
+  ✅ Collateral has been properly withdrawn.

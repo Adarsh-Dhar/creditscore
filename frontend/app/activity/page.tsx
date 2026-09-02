@@ -16,6 +16,9 @@ export default function ActivityPage() {
     setProtocolFilter,
     eventPage,
     setEventPage,
+    eventPageSize,
+    setEventPageSize,
+    totalEvents,
     loadWalletData,
     eventIcons,
     eventColors,
@@ -62,6 +65,15 @@ export default function ActivityPage() {
             <option value="aave">Aave</option>
             <option value="compound">Compound</option>
             <option value="morpho">Morpho</option>
+          </select>
+          <select
+            className="filter-dropdown"
+            value={eventPageSize.toString()}
+            onChange={(e) => setEventPageSize(parseInt(e.target.value))}
+          >
+            <option value="10">10 per page</option>
+            <option value="50">50 per page</option>
+            <option value="100">100 per page</option>
           </select>
           <button className="refresh-button" onClick={() => loadWalletData(currentAddress)} disabled={loading.events}>
             {loading.events ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
@@ -118,10 +130,10 @@ export default function ActivityPage() {
               >
                 Previous
               </button>
-              <span>Page {eventPage}</span>
+              <span>Page {eventPage} of {Math.ceil(totalEvents / eventPageSize) || 1}</span>
               <button
                 className="pagination-button"
-                disabled={events.length < 50}
+                disabled={eventPage >= Math.ceil(totalEvents / eventPageSize)}
                 onClick={() => setEventPage(p => p + 1)}
               >
                 Next
