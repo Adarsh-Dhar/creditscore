@@ -1,3 +1,7 @@
+// at the very top of api/src/index.ts, before any db imports
+import { Temporal } from '@js-temporal/polyfill';
+// @ts-expect-error - polyfilling the global
+globalThis.Temporal = Temporal;
 import path from "node:path";
 import dotenv from "dotenv";
 
