@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "indexer/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
 
 import { db } from "creditscore-db";
 import { POINTS_BY_EVENT } from "./config.js";

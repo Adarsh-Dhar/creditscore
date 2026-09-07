@@ -17,6 +17,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
 
 import { JsonRpcProvider, Contract, Interface, getAddress, isAddress, type Log, type Result } from "ethers";
 import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE, type ProtocolConfig, type ChainConfig } from "./config.js";
@@ -34,6 +35,7 @@ import {
   extractAssetAndAmount as extractMorphoAssetAndAmount,
 } from "./morphoDecoder.js";
 import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent } from "./store.js";
+import { db } from "creditscore-db";
 
 // Helper functions for single transaction indexing
 function checksum(addr: string | null | undefined): string | null | undefined {
@@ -695,37 +697,47 @@ function printSummary(eventStore: {
 async function main(): Promise<void> {
   const cli = parseArgs();
 
-  if (cli.watch) {
-    console.log("Backfilling from last checkpoint...");
+  // Connect to database before running any queries
+  console.log("Connecting to database...");
+  const runtime = await db.connect({ url: process.env.DATABASE_URL! });
+  console.log("Database connected successfully");
+
+  try {
+    if (cli.watch) {
+      console.log("Backfilling from last checkpoint...");
+      await runOnce(cli);
+
+      const contracts = await startLiveListeners();
+      console.log("\nLive-listening for new events. Ctrl+C to stop.");
+
+      let shuttingDown = false;
+      const shutdown = () => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log("\nShutdown requested, stopping listeners...");
+        Promise.all(contracts.map((c) => c.removeAllListeners()))
+          .then(() => disconnect())
+          .then(() => runtime.close())
+          .finally(() => process.exit(0));
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+
+      return;
+    }
+
     await runOnce(cli);
-
-    const contracts = await startLiveListeners();
-    console.log("\nLive-listening for new events. Ctrl+C to stop.");
-
-    let shuttingDown = false;
-    const shutdown = () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      console.log("\nShutdown requested, stopping listeners...");
-      Promise.all(contracts.map((c) => c.removeAllListeners()))
-        .then(() => disconnect())
-        .finally(() => process.exit(0));
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-
-    return;
+    const eventStore = await loadEvents();
+    printSummary(eventStore);
+    await disconnect();
+  } finally {
+    await runtime.close();
+    console.log("Database connection closed");
   }
-
-  await runOnce(cli);
-  const eventStore = await loadEvents();
-  printSummary(eventStore);
-  await disconnect();
 }
 
-if (require.main === module) {
-  main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
-}
+// Run main function when executed directly
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

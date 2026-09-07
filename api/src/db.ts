@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "api/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
 
 import { db } from "creditscore-db";
 
