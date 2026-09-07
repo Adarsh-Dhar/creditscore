@@ -33,9 +33,7 @@ export type NewIndexedEvent = Omit<
 >;
 
 export async function loadCheckpoint(chain: string, contractAddress: string): Promise<Checkpoint> {
-  const checkpoint = await db.orm.public.IndexerCheckpoint.where((c: any) => 
-    c.chain.eq(chain).and(c.contractAddress.eq(contractAddress))
-  ).first();
+  const checkpoint = await db.orm.public.IndexerCheckpoint.where({ chain, contractAddress }).first();
   return checkpoint || { lastIndexedBlock: null };
 }
 
@@ -44,9 +42,7 @@ export async function saveCheckpoint(
   contractAddress: string,
   lastIndexedBlock: number
 ): Promise<void> {
-  await db.orm.public.IndexerCheckpoint.where((c: any) => 
-    c.chain.eq(chain).and(c.contractAddress.eq(contractAddress))
-  ).upsert({
+  await db.orm.public.IndexerCheckpoint.upsert({
     create: {
       chain,
       contractAddress,
@@ -116,13 +112,9 @@ export async function upsertEvent(eventData: NewIndexedEvent): Promise<{
   const { txHash, logIndex, ...rest } = eventData;
   
   // Check if event already exists before upsert
-  const existing = await db.orm.public.IndexedEvent.where((e: any) => 
-    e.txHash.eq(txHash).and(e.logIndex.eq(logIndex))
-  ).first();
+  const existing = await db.orm.public.IndexedEvent.where({ txHash, logIndex }).first();
 
-  const event = await db.orm.public.IndexedEvent.where((e: any) => 
-    e.txHash.eq(txHash).and(e.logIndex.eq(logIndex))
-  ).upsert({
+  const event = await db.orm.public.IndexedEvent.upsert({
     create: eventData,
     update: rest,
   });
@@ -162,7 +154,7 @@ export async function loadUnprovenEvents(
     query.where((e: any) => e.protocol.eq(protocol));
   }
 
-  return (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).take(limit).all();
+  return (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).limit(limit).all();
 }
 
 export async function loadEventByTxHash(txHash: string | null | undefined): Promise<{

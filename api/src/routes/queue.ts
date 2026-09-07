@@ -16,8 +16,8 @@ router.get("/unproven", async (req: Request, res: Response, next: NextFunction) 
       query.where((e: any) => e.chain.eq(chain));
     }
 
-    const events = await (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).take(parseInt(limit)).all();
-    const totalResult = await query.aggregate((a: any) => a.count());
+    const events = await (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).limit(parseInt(limit)).all();
+    const totalResult = await query.aggregate((a: any) => ({ count: a.count() }));
     const total = (totalResult as any).count || 0;
 
     res.json({

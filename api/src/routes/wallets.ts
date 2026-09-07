@@ -21,8 +21,8 @@ const EVENT_WEIGHTS: Record<string, number> = {
 
 async function getStatsFromDb(wallet: string) {
   const events = await db.orm.public.IndexedEvent.where((e: any) => 
-    e.wallet.ilike(wallet).and(e.proven.eq(true))
-  ).all();
+    e.wallet.ilike(wallet)
+  ).where((e: any) => e.proven.eq(true)).all();
 
   const stats = {
     supplyCount: "0",
@@ -74,8 +74,8 @@ router.get("/:address/events", async (req: Request, res: Response, next: NextFun
     const take = parseInt(limit);
 
     const [events, totalResult] = await Promise.all([
-      (query.orderBy([(e: any) => e.blockNumber.desc(), (e: any) => e.logIndex.desc()]) as any).skip(skip).take(take).all(),
-      query.aggregate((a: any) => a.count()),
+      (query.orderBy([(e: any) => e.blockNumber.desc(), (e: any) => e.logIndex.desc()]) as any).offset(skip).limit(take).all(),
+      query.aggregate((a: any) => ({ count: a.count() })),
     ]);
 
     const total = (totalResult as any).count || 0;
@@ -109,8 +109,8 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     const [stats, unprovenCountResult] = await Promise.all([
       getStatsFromDb(checksummedAddress),
       db.orm.public.IndexedEvent.where((e: any) => 
-        e.wallet.ilike(checksummedAddress).and(e.proven.eq(false))
-      ).aggregate((a: any) => a.count()).catch(() => ({ count: 0 })),
+        e.wallet.ilike(checksummedAddress)
+      ).where((e: any) => e.proven.eq(false)).aggregate((a: any) => ({ count: a.count() })).catch(() => ({ count: 0 })),
     ]);
 
     const unprovenCount = (unprovenCountResult as any).count || 0;
@@ -170,7 +170,7 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     const checksummedAddress = ethers.getAddress(address);
 
     // Upsert the wallet in RegisteredWallet
-    const wallet = await db.orm.public.RegisteredWallet.where({ wallet: checksummedAddress }).upsert({
+    const wallet = await db.orm.public.RegisteredWallet.upsert({
       create: { wallet: checksummedAddress, points: 0 },
       update: { lastSeenAt: new Date() },
     });

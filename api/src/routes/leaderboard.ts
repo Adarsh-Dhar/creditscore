@@ -13,7 +13,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     // Get registered wallets ordered by points
     const wallets = await (db.orm.public.RegisteredWallet
       .orderBy((w: any) => w.points.desc()) as any)
-      .take(effectiveLimit)
+      .limit(effectiveLimit)
       .all();
 
     // Add ranks
@@ -23,7 +23,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       score: w.points,
     }));
 
-    const totalWalletsResult = await db.orm.public.RegisteredWallet.aggregate((a: any) => a.count());
+    const totalWalletsResult = await db.orm.public.RegisteredWallet.aggregate((a: any) => ({ count: a.count() }));
     const totalWallets = (totalWalletsResult as any).count || 0;
 
     res.json({
