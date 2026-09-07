@@ -107,6 +107,9 @@ importers:
 
   indexer:
     dependencies:
+      '@js-temporal/polyfill':
+        specifier: ^0.5.1
+        version: 0.5.1
       creditscore-db:
         specifier: workspace:*
         version: link:../db

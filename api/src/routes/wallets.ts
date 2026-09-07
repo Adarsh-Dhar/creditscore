@@ -172,10 +172,10 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
 
     // Upsert the wallet in RegisteredWallet
     const wallet = await db.orm.public.RegisteredWallet.upsert({
-      create: { wallet: checksummedAddress, points: 0 },
+      conflictOn: { wallet: checksummedAddress },
+      create: { wallet: checksummedAddress, points: 0, lastSeenAt: Temporal.Now.instant() },
       update: { lastSeenAt: Temporal.Now.instant() },
     });
-
     res.json({
       wallet: wallet.wallet,
       points: wallet.points,

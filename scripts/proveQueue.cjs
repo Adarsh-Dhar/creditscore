@@ -27,10 +27,10 @@
 
 require("dotenv").config();
 const { JsonRpcProvider, Wallet, Contract, keccak256, toUtf8Bytes } = require("ethers");
-const { processBatch } = require("./lib/proveBatch");
-const { proveTransaction } = require("./lib/proveTransaction");
-const { EVENT_TYPE_INDEX } = require("./lib/eventTypes");
-const { loadUnprovenEvents, markProven, disconnect } = require("../indexer/dist/store");
+const { processBatch } = require("./lib/proveBatch.cjs");
+const { proveTransaction } = require("./lib/proveTransaction.cjs");
+const { EVENT_TYPE_INDEX } = require("./lib/eventTypes.cjs");
+const { loadUnprovenEvents, markProven, disconnect } = require("./lib/db.cjs");
 
 const BATCH_SIZE = Number(process.env.PROVE_BATCH_SIZE || 10);
 

@@ -13,15 +13,14 @@
 
 require("dotenv").config();
 const { JsonRpcProvider } = require("ethers");
-const { proveTransaction } = require("./lib/proveTransaction");
-const { EVENT_TYPE_INDEX, EVENT_TYPE_NAMES } = require("./lib/eventTypes");
+const { proveTransaction } = require("./lib/proveTransaction.cjs");
+const { EVENT_TYPE_INDEX, EVENT_TYPE_NAMES } = require("./lib/eventTypes.cjs");
 const {
   loadEventByTxHash,
   loadUnprovenEvents,
   markProven,
   disconnect,
-} = require("../indexer/src/store");
-const { indexSingleTx } = require("../indexer/src/index");
+} = require("./lib/db.cjs");
 
 const AAVE_SELECTORS = {
   "0x617ba037": "Supply",
@@ -166,24 +165,7 @@ async function main() {
   if (indexed) {
     await markProven(sourceTxHash).catch(() => {});
   } else {
-    try {
-      const row = await indexSingleTx({
-        txHash: sourceTxHash,
-        chain: eventChain,
-        protocol,
-        sourceRpc,
-        expectedWallet: targetWallet,
-        eventName,
-        proven: true,
-      });
-      if (row) {
-        console.log(
-          `  backfilled IndexedEvent ${row.eventName} wallet=${row.wallet} logIndex=${row.logIndex}`
-        );
-      }
-    } catch (err) {
-      console.warn(`  ! Postgres backfill failed: ${err.message}`);
-    }
+    console.log("  note: tx was not in the indexer DB — mark it manually if needed.");
   }
 
   if (result.alreadyProven) {

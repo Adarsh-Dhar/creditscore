@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "creditscore-db": "workspace:*",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.0",

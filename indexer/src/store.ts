@@ -1,5 +1,6 @@
 import path from "node:path";
 import dotenv from "dotenv";
+import { Temporal } from "@js-temporal/polyfill";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "indexer/.env") });
@@ -44,13 +45,16 @@ export async function saveCheckpoint(
   lastIndexedBlock: number
 ): Promise<void> {
   await db.orm.public.IndexerCheckpoint.upsert({
+    conflictOn: { chain, contractAddress },
     create: {
       chain,
       contractAddress,
       lastIndexedBlock,
+      updatedAt: Temporal.Now.instant(),
     },
     update: {
       lastIndexedBlock,
+      updatedAt: Temporal.Now.instant(),
     },
   });
 }
@@ -116,6 +120,7 @@ export async function upsertEvent(eventData: NewIndexedEvent): Promise<{
   const existing = await db.orm.public.IndexedEvent.where({ txHash, logIndex }).first();
 
   const event = await db.orm.public.IndexedEvent.upsert({
+    conflictOn: { txHash, logIndex },
     create: eventData,
     update: rest,
   });
