@@ -1,5 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
+import { Temporal } from "@js-temporal/polyfill";
 import db from "../db.js";
 
 // Map DB eventName -> the stats bucket it belongs to
@@ -42,7 +43,7 @@ async function getStatsFromDb(wallet: string) {
   return stats;
 }
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 // GET /api/wallets/:address/events - paginated events for a wallet
 router.get("/:address/events", async (req: Request, res: Response, next: NextFunction) => {
@@ -172,7 +173,7 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     // Upsert the wallet in RegisteredWallet
     const wallet = await db.orm.public.RegisteredWallet.upsert({
       create: { wallet: checksummedAddress, points: 0 },
-      update: { lastSeenAt: new Date() },
+      update: { lastSeenAt: Temporal.Now.instant() },
     });
 
     res.json({
