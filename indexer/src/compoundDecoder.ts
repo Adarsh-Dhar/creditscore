@@ -1,5 +1,5 @@
 import type { Result } from "ethers";
-import type { AssetAndAmount } from "./aaveDecoder";
+import type { AssetAndAmount } from "./aaveDecoder.js";
 
 // Compound Comet decoder - wallet and asset extraction logic
 // For Compound Comet, event classification depends on asset type:

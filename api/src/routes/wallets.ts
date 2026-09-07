@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
-import prisma from "../db";
-import type { Prisma } from "@prisma/client";
+import db from "../db.js";
 
 // Map DB eventName -> the stats bucket it belongs to
 const EVENT_TO_STAT_KEY: Record<string, string> = {
@@ -21,11 +20,9 @@ const EVENT_WEIGHTS: Record<string, number> = {
 };
 
 async function getStatsFromDb(wallet: string) {
-  const rows = await prisma.indexedEvent.groupBy({
-    by: ["eventName"],
-    where: { wallet: { equals: wallet, mode: "insensitive" }, proven: true },
-    _count: { id: true },
-  });
+  const events = await db.orm.public.IndexedEvent.where((e: any) => 
+    e.wallet.ilike(wallet).and(e.proven.eq(true))
+  ).all();
 
   const stats = {
     supplyCount: "0",
@@ -35,9 +32,11 @@ async function getStatsFromDb(wallet: string) {
     liquidationCount: "0",
   };
 
-  for (const row of rows) {
-    const key = EVENT_TO_STAT_KEY[row.eventName];
-    if (key) stats[key as keyof typeof stats] = row._count.id.toString();
+  for (const event of events) {
+    const key = EVENT_TO_STAT_KEY[event.eventName];
+    if (key) {
+      stats[key as keyof typeof stats] = (parseInt(stats[key as keyof typeof stats]) + 1).toString();
+    }
   }
 
   return stats;
@@ -57,31 +56,29 @@ router.get("/:address/events", async (req: Request, res: Response, next: NextFun
     }
     const checksummedAddress = ethers.getAddress(address);
 
-    const where: Prisma.IndexedEventWhereInput = {
-      wallet: { equals: checksummedAddress, mode: "insensitive" },
-    };
+    const query = db.orm.public.IndexedEvent.where((e: any) => 
+      e.wallet.ilike(checksummedAddress)
+    );
+    
     if (eventName) {
-      where.eventName = eventName;
+      query.where((e: any) => e.eventName.eq(eventName));
     }
     if (proven !== undefined) {
-      where.proven = proven === "true";
+      query.where((e: any) => e.proven.eq(proven === "true"));
     }
     if (protocol) {
-      where.protocol = protocol;
+      query.where((e: any) => e.protocol.eq(protocol));
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const take = parseInt(limit);
 
-    const [events, total] = await Promise.all([
-      prisma.indexedEvent.findMany({
-        where,
-        orderBy: [{ blockNumber: "desc" }, { logIndex: "desc" }],
-        skip,
-        take,
-      }),
-      prisma.indexedEvent.count({ where }),
+    const [events, totalResult] = await Promise.all([
+      (query.orderBy([(e: any) => e.blockNumber.desc(), (e: any) => e.logIndex.desc()]) as any).skip(skip).take(take).all(),
+      query.aggregate((a: any) => a.count()),
     ]);
+
+    const total = (totalResult as any).count || 0;
 
     res.json({
       events,
@@ -109,17 +106,14 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     const checksummedAddress = ethers.getAddress(address);
 
     // Get on-chain data in parallel
-    const [stats, unprovenCount] = await Promise.all([
+    const [stats, unprovenCountResult] = await Promise.all([
       getStatsFromDb(checksummedAddress),
-      prisma.indexedEvent
-        .count({
-          where: {
-            wallet: { equals: checksummedAddress, mode: "insensitive" },
-            proven: false,
-          },
-        })
-        .catch(() => 0),
+      db.orm.public.IndexedEvent.where((e: any) => 
+        e.wallet.ilike(checksummedAddress).and(e.proven.eq(false))
+      ).aggregate((a: any) => a.count()).catch(() => ({ count: 0 })),
     ]);
+
+    const unprovenCount = (unprovenCountResult as any).count || 0;
 
     const score = (
       parseInt(stats.supplyCount) * EVENT_WEIGHTS.Supply +
@@ -130,25 +124,25 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     ).toString();
 
     // Get last event timestamp
-    const lastEvent = await prisma.indexedEvent.findFirst({
-      where: { wallet: { equals: checksummedAddress, mode: "insensitive" } },
-      orderBy: { blockNumber: "desc" },
-    });
+    const lastEvent = await db.orm.public.IndexedEvent.where((e: any) => 
+      e.wallet.ilike(checksummedAddress)
+    ).orderBy((e: any) => e.blockNumber.desc()).first();
 
     // Get protocol breakdown from DB (off-chain only)
-    const protocolBreakdown = await prisma.indexedEvent.groupBy({
-      by: ["protocol", "eventName"],
-      where: { wallet: { equals: checksummedAddress, mode: "insensitive" } },
-      _count: { id: true },
-    });
+    const events = await db.orm.public.IndexedEvent.where((e: any) => 
+      e.wallet.ilike(checksummedAddress)
+    ).all();
 
     // Format protocol breakdown for easier consumption
     const protocolSummary: Record<string, Record<string, number>> = {};
-    for (const item of protocolBreakdown) {
-      if (!protocolSummary[item.protocol]) {
-        protocolSummary[item.protocol] = {};
+    for (const event of events) {
+      if (!protocolSummary[event.protocol]) {
+        protocolSummary[event.protocol] = {};
       }
-      protocolSummary[item.protocol][item.eventName] = item._count.id;
+      if (!protocolSummary[event.protocol][event.eventName]) {
+        protocolSummary[event.protocol][event.eventName] = 0;
+      }
+      protocolSummary[event.protocol][event.eventName]++;
     }
 
     res.json({
@@ -176,10 +170,9 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     const checksummedAddress = ethers.getAddress(address);
 
     // Upsert the wallet in RegisteredWallet
-    const wallet = await prisma.registeredWallet.upsert({
-      where: { wallet: checksummedAddress },
-      update: { lastSeenAt: new Date() },
+    const wallet = await db.orm.public.RegisteredWallet.where({ wallet: checksummedAddress }).upsert({
       create: { wallet: checksummedAddress, points: 0 },
+      update: { lastSeenAt: new Date() },
     });
 
     res.json({

@@ -1,16 +1,16 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 import express, { type Request, type Response, type NextFunction, type ErrorRequestHandler } from "express";
 import cors from "cors";
 
-import walletsRouter from "./routes/wallets";
-import leaderboardRouter from "./routes/leaderboard";
-import chainsRouter from "./routes/chains";
-import queueRouter from "./routes/queue";
-import weightsRouter from "./routes/weights";
+import walletsRouter from "./routes/wallets.js";
+import leaderboardRouter from "./routes/leaderboard.js";
+import chainsRouter from "./routes/chains.js";
+import queueRouter from "./routes/queue.js";
+import weightsRouter from "./routes/weights.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;

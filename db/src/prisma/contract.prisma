@@ -24,7 +24,7 @@ model IndexerCheckpoint {
   chain            String
   contractAddress  String
   lastIndexedBlock Int
-  updatedAt        DateTime @updatedAt
+  updatedAt        temporal.updatedAt()
 
   @@unique([chain, contractAddress])
 }
@@ -34,5 +34,5 @@ model RegisteredWallet {
   wallet     String   @unique
   points     Int      @default(0)
   createdAt  DateTime @default(now())
-  lastSeenAt DateTime @updatedAt
+  lastSeenAt temporal.updatedAt()
 }

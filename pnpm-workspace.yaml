@@ -4,3 +4,8 @@ allowBuilds:
   msgpackr-extract: false
   secp256k1: false
   workerd: false
+
+packages:
+  - 'api'
+  - 'indexer'
+  - 'db'

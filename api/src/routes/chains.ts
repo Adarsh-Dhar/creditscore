@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import prisma from "../db";
-import { getBlockNumber } from "../chain";
+import db from "../db.js";
+import { getBlockNumber } from "../chain.js";
 
 const router = express.Router();
 
@@ -17,7 +17,7 @@ interface ChainStatus {
 // GET /api/chains/status - indexer lag for each chain
 router.get("/status", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const checkpoints = await prisma.indexerCheckpoint.findMany();
+    const checkpoints = await db.orm.public.IndexerCheckpoint.all();
 
     // Group by chain to avoid duplicates
     const chainMap = new Map<string, ChainStatus>();

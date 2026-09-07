@@ -2,7 +2,7 @@
   "name": "creditscore-mvp",
   "version": "0.1.0",
   "description": "Minimal proof-of-concept: prove an Aave transaction on Ethereum Sepolia via Creditcoin's Attestcoin Protocol and increment an on-chain score.",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
@@ -34,7 +34,6 @@
   "dependencies": {
     "@gluwa/usc-contracts": "^0.1.2",
     "@gluwa/usc-sdk": "^0.18.0",
-    "@prisma/client": "^7.10.0",
     "@prisma/orm-postgres": "8.0.0-rc.8",
     "dotenv": "^16.6.1",
     "ethers": "^6.13.0",

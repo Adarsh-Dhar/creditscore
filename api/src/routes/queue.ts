@@ -1,6 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import prisma from "../db";
-import type { Prisma } from "@prisma/client";
+import db from "../db.js";
 
 const router = express.Router();
 
@@ -12,18 +11,14 @@ router.get("/unproven", async (req: Request, res: Response, next: NextFunction) 
   try {
     const { limit = "10", chain } = req.query as Record<string, string>;
 
-    const where: Prisma.IndexedEventWhereInput = { proven: false };
+    const query = db.orm.public.IndexedEvent.where((e: any) => e.proven.eq(false));
     if (chain) {
-      where.chain = chain;
+      query.where((e: any) => e.chain.eq(chain));
     }
 
-    const events = await prisma.indexedEvent.findMany({
-      where,
-      orderBy: [{ blockNumber: "asc" }, { logIndex: "asc" }],
-      take: parseInt(limit),
-    });
-
-    const total = await prisma.indexedEvent.count({ where });
+    const events = await (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).take(parseInt(limit)).all();
+    const totalResult = await query.aggregate((a: any) => a.count());
+    const total = (totalResult as any).count || 0;
 
     res.json({
       events,

@@ -1,5 +1,5 @@
 import type { Result } from "ethers";
-import type { AssetAndAmount } from "./aaveDecoder";
+import type { AssetAndAmount } from "./aaveDecoder.js";
 
 // Morpho Blue decoder - wallet and asset extraction logic
 // The wallet field isn't in the same arg position across event types —

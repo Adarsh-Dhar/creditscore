@@ -1,0 +1,379 @@
+[
+  {
+    "id": "schema.public",
+    "label": "Create schema \"public\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres"
+    },
+    "precheck": [],
+    "execute": [
+      {
+        "description": "Create schema \"public\"",
+        "sql": "CREATE SCHEMA IF NOT EXISTS \"public\"",
+        "params": []
+      }
+    ],
+    "postcheck": []
+  },
+  {
+    "id": "table.indexedEvent",
+    "label": "Create table \"indexedEvent\"",
+    "summary": "Creates table \"indexedEvent\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "indexedEvent"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"indexedEvent\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"indexedEvent\"",
+        "sql": "CREATE TABLE \"public\".\"indexedEvent\" (\n  \"amount\" text NOT NULL,\n  \"asset\" text,\n  \"blockNumber\" int4 NOT NULL,\n  \"chain\" text DEFAULT 'sepolia' NOT NULL,\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"eventName\" text NOT NULL,\n  \"id\" SERIAL NOT NULL,\n  \"logIndex\" int4 NOT NULL,\n  \"protocol\" text DEFAULT 'aave' NOT NULL,\n  \"proven\" bool DEFAULT false NOT NULL,\n  \"timestamp\" int4,\n  \"txHash\" text NOT NULL,\n  \"wallet\" text NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"indexedEvent\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.indexerCheckpoint",
+    "label": "Create table \"indexerCheckpoint\"",
+    "summary": "Creates table \"indexerCheckpoint\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "indexerCheckpoint"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"indexerCheckpoint\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexerCheckpoint\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"indexerCheckpoint\"",
+        "sql": "CREATE TABLE \"public\".\"indexerCheckpoint\" (\n  \"chain\" text NOT NULL,\n  \"contractAddress\" text NOT NULL,\n  \"id\" SERIAL NOT NULL,\n  \"lastIndexedBlock\" int4 NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"indexerCheckpoint\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexerCheckpoint\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.registeredWallet",
+    "label": "Create table \"registeredWallet\"",
+    "summary": "Creates table \"registeredWallet\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "registeredWallet"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"registeredWallet\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"registeredWallet\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"registeredWallet\"",
+        "sql": "CREATE TABLE \"public\".\"registeredWallet\" (\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"id\" SERIAL NOT NULL,\n  \"lastSeenAt\" timestamptz NOT NULL,\n  \"points\" int4 DEFAULT 0 NOT NULL,\n  \"wallet\" text NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"registeredWallet\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"registeredWallet\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.indexedEvent.indexedEvent_txHash_logIndex_key",
+    "label": "Add unique constraint on \"indexedEvent\" (txHash, logIndex)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "indexedEvent_txHash_logIndex_key",
+        "table": "indexedEvent"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"indexedEvent_txHash_logIndex_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "indexedEvent_txHash_logIndex_key",
+          "public",
+          "\"public\".\"indexedEvent\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"indexedEvent_txHash_logIndex_key\"",
+        "sql": "ALTER TABLE \"public\".\"indexedEvent\" ADD CONSTRAINT \"indexedEvent_txHash_logIndex_key\" UNIQUE (\"txHash\", \"logIndex\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"indexedEvent_txHash_logIndex_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "indexedEvent_txHash_logIndex_key",
+          "public",
+          "\"public\".\"indexedEvent\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.indexerCheckpoint.indexerCheckpoint_chain_contractAddress_key",
+    "label": "Add unique constraint on \"indexerCheckpoint\" (chain, contractAddress)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "indexerCheckpoint_chain_contractAddress_key",
+        "table": "indexerCheckpoint"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"indexerCheckpoint_chain_contractAddress_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "indexerCheckpoint_chain_contractAddress_key",
+          "public",
+          "\"public\".\"indexerCheckpoint\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"indexerCheckpoint_chain_contractAddress_key\"",
+        "sql": "ALTER TABLE \"public\".\"indexerCheckpoint\" ADD CONSTRAINT \"indexerCheckpoint_chain_contractAddress_key\" UNIQUE (\"chain\", \"contractAddress\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"indexerCheckpoint_chain_contractAddress_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "indexerCheckpoint_chain_contractAddress_key",
+          "public",
+          "\"public\".\"indexerCheckpoint\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.registeredWallet.registeredWallet_wallet_key",
+    "label": "Add unique constraint on \"registeredWallet\" (wallet)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "registeredWallet_wallet_key",
+        "table": "registeredWallet"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"registeredWallet_wallet_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "registeredWallet_wallet_key",
+          "public",
+          "\"public\".\"registeredWallet\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"registeredWallet_wallet_key\"",
+        "sql": "ALTER TABLE \"public\".\"registeredWallet\" ADD CONSTRAINT \"registeredWallet_wallet_key\" UNIQUE (\"wallet\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"registeredWallet_wallet_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "registeredWallet_wallet_key",
+          "public",
+          "\"public\".\"registeredWallet\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.indexedEvent.indexedEvent_protocol_idx_ccac2c0a",
+    "label": "Create index \"indexedEvent_protocol_idx_ccac2c0a\" on \"indexedEvent\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "indexedEvent_protocol_idx_ccac2c0a",
+        "table": "indexedEvent"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"indexedEvent_protocol_idx_ccac2c0a\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_protocol_idx_ccac2c0a\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"indexedEvent_protocol_idx_ccac2c0a\"",
+        "sql": "CREATE INDEX \"indexedEvent_protocol_idx_ccac2c0a\" ON \"public\".\"indexedEvent\" (\"protocol\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"indexedEvent_protocol_idx_ccac2c0a\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_protocol_idx_ccac2c0a\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.indexedEvent.indexedEvent_proven_idx_0df99ddc",
+    "label": "Create index \"indexedEvent_proven_idx_0df99ddc\" on \"indexedEvent\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "indexedEvent_proven_idx_0df99ddc",
+        "table": "indexedEvent"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"indexedEvent_proven_idx_0df99ddc\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_proven_idx_0df99ddc\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"indexedEvent_proven_idx_0df99ddc\"",
+        "sql": "CREATE INDEX \"indexedEvent_proven_idx_0df99ddc\" ON \"public\".\"indexedEvent\" (\"proven\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"indexedEvent_proven_idx_0df99ddc\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_proven_idx_0df99ddc\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.indexedEvent.indexedEvent_wallet_idx_df52cf87",
+    "label": "Create index \"indexedEvent_wallet_idx_df52cf87\" on \"indexedEvent\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "indexedEvent_wallet_idx_df52cf87",
+        "table": "indexedEvent"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"indexedEvent_wallet_idx_df52cf87\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_wallet_idx_df52cf87\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"indexedEvent_wallet_idx_df52cf87\"",
+        "sql": "CREATE INDEX \"indexedEvent_wallet_idx_df52cf87\" ON \"public\".\"indexedEvent\" (\"wallet\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"indexedEvent_wallet_idx_df52cf87\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"indexedEvent_wallet_idx_df52cf87\""
+        ]
+      }
+    ]
+  }
+]

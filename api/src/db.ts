@@ -1,11 +1,10 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "api/.env") });
 
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import { db } from "creditscore-db";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env file");
@@ -20,7 +19,4 @@ if (
   console.error("Format: postgresql://username:password@localhost:5433/database_name");
 }
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
-
-export default prisma;
+export default db;

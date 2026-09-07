@@ -4,12 +4,16 @@
   "target": "postgres",
   "profileHash": "3916f444a8a17ad749191acf9e08dad97d1a327b88c2f1d45d12f240296aa8b2",
   "roots": {
-    "post": {
-      "model": "Post",
+    "indexedEvent": {
+      "model": "IndexedEvent",
       "namespace": "public"
     },
-    "user": {
-      "model": "User",
+    "indexerCheckpoint": {
+      "model": "IndexerCheckpoint",
+      "namespace": "public"
+    },
+    "registeredWallet": {
+      "model": "RegisteredWallet",
       "namespace": "public"
     }
   },
@@ -17,17 +21,31 @@
     "namespaces": {
       "public": {
         "models": {
-          "Post": {
+          "IndexedEvent": {
             "fields": {
-              "authorId": {
+              "amount": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "asset": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "blockNumber": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/int4@1",
                   "kind": "scalar"
                 }
               },
-              "content": {
-                "nullable": true,
+              "chain": {
+                "nullable": false,
                 "type": {
                   "codecId": "pg/text@1",
                   "kind": "scalar"
@@ -36,7 +54,14 @@
               "createdAt": {
                 "nullable": false,
                 "type": {
-                  "codecId": "pg/timestamptz-string@1",
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              },
+              "eventName": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
@@ -47,73 +72,106 @@
                   "kind": "scalar"
                 }
               },
-              "title": {
+              "logIndex": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "protocol": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
-              "updatedAt": {
+              "proven": {
                 "nullable": false,
                 "type": {
-                  "codecId": "pg/timestamptz-string@1",
+                  "codecId": "pg/bool@1",
+                  "kind": "scalar"
+                }
+              },
+              "timestamp": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "txHash": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "wallet": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               }
             },
-            "relations": {
-              "author": {
-                "cardinality": "N:1",
-                "on": {
-                  "localFields": [
-                    "authorId"
-                  ],
-                  "targetFields": [
-                    "id"
-                  ]
-                },
-                "to": {
-                  "model": "User",
-                  "namespace": "public"
-                }
-              }
-            },
+            "relations": {},
             "storage": {
               "fields": {
-                "authorId": {
-                  "column": "authorId"
+                "amount": {
+                  "column": "amount"
                 },
-                "content": {
-                  "column": "content"
+                "asset": {
+                  "column": "asset"
+                },
+                "blockNumber": {
+                  "column": "blockNumber"
+                },
+                "chain": {
+                  "column": "chain"
                 },
                 "createdAt": {
                   "column": "createdAt"
                 },
+                "eventName": {
+                  "column": "eventName"
+                },
                 "id": {
                   "column": "id"
                 },
-                "title": {
-                  "column": "title"
+                "logIndex": {
+                  "column": "logIndex"
                 },
-                "updatedAt": {
-                  "column": "updatedAt"
+                "protocol": {
+                  "column": "protocol"
+                },
+                "proven": {
+                  "column": "proven"
+                },
+                "timestamp": {
+                  "column": "timestamp"
+                },
+                "txHash": {
+                  "column": "txHash"
+                },
+                "wallet": {
+                  "column": "wallet"
                 }
               },
               "namespaceId": "public",
-              "table": "post"
+              "table": "indexedEvent"
             }
           },
-          "User": {
+          "IndexerCheckpoint": {
             "fields": {
-              "createdAt": {
+              "chain": {
                 "nullable": false,
                 "type": {
-                  "codecId": "pg/timestamptz-string@1",
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
-              "email": {
+              "contractAddress": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/text@1",
@@ -127,68 +185,103 @@
                   "kind": "scalar"
                 }
               },
-              "name": {
-                "nullable": true,
+              "lastIndexedBlock": {
+                "nullable": false,
                 "type": {
-                  "codecId": "pg/text@1",
+                  "codecId": "pg/int4@1",
                   "kind": "scalar"
                 }
               },
               "updatedAt": {
                 "nullable": false,
                 "type": {
-                  "codecId": "pg/timestamptz-string@1",
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "chain": {
+                  "column": "chain"
+                },
+                "contractAddress": {
+                  "column": "contractAddress"
+                },
+                "id": {
+                  "column": "id"
+                },
+                "lastIndexedBlock": {
+                  "column": "lastIndexedBlock"
+                },
+                "updatedAt": {
+                  "column": "updatedAt"
+                }
+              },
+              "namespaceId": "public",
+              "table": "indexerCheckpoint"
+            }
+          },
+          "RegisteredWallet": {
+            "fields": {
+              "createdAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-temporal@1",
                   "kind": "scalar"
                 }
               },
-              "username": {
-                "nullable": true,
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "lastSeenAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              },
+              "points": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "wallet": {
+                "nullable": false,
                 "type": {
                   "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               }
             },
-            "relations": {
-              "posts": {
-                "cardinality": "1:N",
-                "on": {
-                  "localFields": [
-                    "id"
-                  ],
-                  "targetFields": [
-                    "authorId"
-                  ]
-                },
-                "to": {
-                  "model": "Post",
-                  "namespace": "public"
-                }
-              }
-            },
+            "relations": {},
             "storage": {
               "fields": {
                 "createdAt": {
                   "column": "createdAt"
                 },
-                "email": {
-                  "column": "email"
-                },
                 "id": {
                   "column": "id"
                 },
-                "name": {
-                  "column": "name"
+                "lastSeenAt": {
+                  "column": "lastSeenAt"
                 },
-                "updatedAt": {
-                  "column": "updatedAt"
+                "points": {
+                  "column": "points"
                 },
-                "username": {
-                  "column": "username"
+                "wallet": {
+                  "column": "wallet"
                 }
               },
               "namespaceId": "public",
-              "table": "user"
+              "table": "registeredWallet"
             }
           }
         }
@@ -200,25 +293,44 @@
       "public": {
         "entries": {
           "table": {
-            "post": {
+            "indexedEvent": {
               "columns": {
-                "authorId": {
-                  "codecId": "pg/int4@1",
-                  "nativeType": "int4",
+                "amount": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
                   "nullable": false
                 },
-                "content": {
+                "asset": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": true
                 },
+                "blockNumber": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "chain": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "sepolia"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
                 "createdAt": {
-                  "codecId": "pg/timestamptz-string@1",
+                  "codecId": "pg/timestamptz-temporal@1",
                   "default": {
                     "expression": "now()",
                     "kind": "function"
                   },
                   "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "eventName": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
                   "nullable": false
                 },
                 "id": {
@@ -230,42 +342,69 @@
                   "nativeType": "int4",
                   "nullable": false
                 },
-                "title": {
+                "logIndex": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "protocol": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "aave"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "proven": {
+                  "codecId": "pg/bool@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": false
+                  },
+                  "nativeType": "bool",
+                  "nullable": false
+                },
+                "timestamp": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": true
+                },
+                "txHash": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": false
                 },
-                "updatedAt": {
-                  "codecId": "pg/timestamptz-string@1",
-                  "nativeType": "timestamptz",
+                "wallet": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
                   "nullable": false
                 }
               },
-              "foreignKeys": [
-                {
-                  "source": {
-                    "columns": [
-                      "authorId"
-                    ],
-                    "namespaceId": "public",
-                    "tableName": "post"
-                  },
-                  "target": {
-                    "columns": [
-                      "id"
-                    ],
-                    "namespaceId": "public",
-                    "tableName": "user"
-                  }
-                }
-              ],
+              "foreignKeys": [],
               "indexes": [
                 {
                   "columns": [
-                    "authorId"
+                    "protocol"
                   ],
-                  "name": "post_authorId_idx_e47547ed",
-                  "prefix": "post_authorId_idx",
+                  "name": "indexedEvent_protocol_idx_ccac2c0a",
+                  "prefix": "indexedEvent_protocol_idx",
+                  "unique": false
+                },
+                {
+                  "columns": [
+                    "proven"
+                  ],
+                  "name": "indexedEvent_proven_idx_0df99ddc",
+                  "prefix": "indexedEvent_proven_idx",
+                  "unique": false
+                },
+                {
+                  "columns": [
+                    "wallet"
+                  ],
+                  "name": "indexedEvent_wallet_idx_df52cf87",
+                  "prefix": "indexedEvent_wallet_idx",
                   "unique": false
                 }
               ],
@@ -274,20 +413,23 @@
                   "id"
                 ]
               },
-              "uniques": []
+              "uniques": [
+                {
+                  "columns": [
+                    "txHash",
+                    "logIndex"
+                  ]
+                }
+              ]
             },
-            "user": {
+            "indexerCheckpoint": {
               "columns": {
-                "createdAt": {
-                  "codecId": "pg/timestamptz-string@1",
-                  "default": {
-                    "expression": "now()",
-                    "kind": "function"
-                  },
-                  "nativeType": "timestamptz",
+                "chain": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
                   "nullable": false
                 },
-                "email": {
+                "contractAddress": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": false
@@ -301,20 +443,15 @@
                   "nativeType": "int4",
                   "nullable": false
                 },
-                "name": {
-                  "codecId": "pg/text@1",
-                  "nativeType": "text",
-                  "nullable": true
-                },
-                "updatedAt": {
-                  "codecId": "pg/timestamptz-string@1",
-                  "nativeType": "timestamptz",
+                "lastIndexedBlock": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
                   "nullable": false
                 },
-                "username": {
-                  "codecId": "pg/text@1",
-                  "nativeType": "text",
-                  "nullable": true
+                "updatedAt": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "nativeType": "timestamptz",
+                  "nullable": false
                 }
               },
               "foreignKeys": [],
@@ -327,7 +464,63 @@
               "uniques": [
                 {
                   "columns": [
-                    "email"
+                    "chain",
+                    "contractAddress"
+                  ]
+                }
+              ]
+            },
+            "registeredWallet": {
+              "columns": {
+                "createdAt": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "lastSeenAt": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "points": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "wallet": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": [
+                {
+                  "columns": [
+                    "wallet"
                   ]
                 }
               ]
@@ -338,40 +531,40 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "1e8412e162dbbe69f4bb3bf8d07f0280ae67eaab15c34dcf201e67468315428d"
+    "storageHash": "5c8e0c48d4a69680a9052cc930dc7647fa7a192e8d9707e69cd57cc9f61b8d0e"
   },
   "execution": {
-    "executionHash": "4abff323cc88151ef9c9a0ec90122cfee6d46814a118cdb66a9fdd94a4123463",
+    "executionHash": "e09700565d85b74e72d3c86018c904ad1a4c2c14041bce98d04c3c95853e9ba4",
     "mutations": {
       "defaults": [
         {
           "onCreate": {
-            "id": "timestampNow",
+            "id": "instantNow",
             "kind": "generator"
           },
           "onUpdate": {
-            "id": "timestampNow",
+            "id": "instantNow",
             "kind": "generator"
           },
           "ref": {
             "column": "updatedAt",
             "namespace": "public",
-            "table": "post"
+            "table": "indexerCheckpoint"
           }
         },
         {
           "onCreate": {
-            "id": "timestampNow",
+            "id": "instantNow",
             "kind": "generator"
           },
           "onUpdate": {
-            "id": "timestampNow",
+            "id": "instantNow",
             "kind": "generator"
           },
           "ref": {
-            "column": "updatedAt",
+            "column": "lastSeenAt",
             "namespace": "public",
-            "table": "user"
+            "table": "registeredWallet"
           }
         }
       ]

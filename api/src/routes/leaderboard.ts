@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import prisma from "../db";
+import db from "../db.js";
 
 const router = express.Router();
 
@@ -11,20 +11,20 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const effectiveLimit = Math.min(limit, maxWallets);
 
     // Get registered wallets ordered by points
-    const wallets = await prisma.registeredWallet.findMany({
-      select: { wallet: true, points: true },
-      orderBy: { points: "desc" },
-      take: effectiveLimit,
-    });
+    const wallets = await (db.orm.public.RegisteredWallet
+      .orderBy((w: any) => w.points.desc()) as any)
+      .take(effectiveLimit)
+      .all();
 
     // Add ranks
-    const ranked = wallets.map((w, i) => ({
+    const ranked = wallets.map((w: any, i: number) => ({
       rank: i + 1,
       wallet: w.wallet,
       score: w.points,
     }));
 
-    const totalWallets = await prisma.registeredWallet.count();
+    const totalWalletsResult = await db.orm.public.RegisteredWallet.aggregate((a: any) => a.count());
+    const totalWallets = (totalWalletsResult as any).count || 0;
 
     res.json({
       leaderboard: ranked,

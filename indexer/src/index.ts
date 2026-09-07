@@ -16,25 +16,24 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 import { JsonRpcProvider, Contract, Interface, getAddress, isAddress, type Log, type Result } from "ethers";
-import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE, type ProtocolConfig, type ChainConfig } from "./config";
+import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE, type ProtocolConfig, type ChainConfig } from "./config.js";
 import {
   extractWallet as extractAaveWallet,
   extractAssetAndAmount as extractAaveAssetAndAmount,
-} from "./aaveDecoder";
+} from "./aaveDecoder.js";
 import {
   extractWallet as extractCompoundWallet,
   extractAssetAndAmount as extractCompoundAssetAndAmount,
   classifyCompoundEvent,
-} from "./compoundDecoder";
+} from "./compoundDecoder.js";
 import {
   extractWallet as extractMorphoWallet,
   extractAssetAndAmount as extractMorphoAssetAndAmount,
-} from "./morphoDecoder";
-import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent } from "./store";
-import type { IndexedEvent } from "@prisma/client";
+} from "./morphoDecoder.js";
+import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent } from "./store.js";
 
 // Helper functions for single transaction indexing
 function checksum(addr: string | null | undefined): string | null | undefined {
@@ -634,7 +633,21 @@ async function startLiveListeners(): Promise<Contract[]> {
   return contracts;
 }
 
-function printSummary(eventStore: IndexedEvent[]): void {
+function printSummary(eventStore: {
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+}[]): void {
   const unproven = eventStore.filter((e) => !e.proven);
   if (unproven.length === 0) {
     console.log("No unproven events queued.");
@@ -642,7 +655,21 @@ function printSummary(eventStore: IndexedEvent[]): void {
   }
 
   // Group by chain for better organization
-  const byChain: Record<string, IndexedEvent[]> = {};
+  const byChain: Record<string, {
+    txHash: string;
+    logIndex: number;
+    blockNumber: number;
+    eventName: string;
+    wallet: string;
+    asset: string | null;
+    amount: string;
+    chain: string;
+    protocol: string;
+    timestamp: number | null;
+    proven: boolean;
+    createdAt: Date;
+    id: number;
+  }[]> = {};
   for (const e of unproven) {
     if (!byChain[e.chain]) {
       byChain[e.chain] = [];

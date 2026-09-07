@@ -1,0 +1,24 @@
+{
+  "name": "creditscore-db",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/prisma/db.ts",
+  "exports": {
+    ".": {
+      "types": "./src/prisma/db.d.ts",
+      "import": "./src/prisma/db.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/orm-postgres": "8.0.0-rc.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^5.6.3"
+  }
+}

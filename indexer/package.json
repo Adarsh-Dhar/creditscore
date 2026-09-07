@@ -2,22 +2,17 @@
   "name": "creditscore-indexer",
   "version": "0.1.0",
   "description": "Off-chain indexer: scans Aave V3 Sepolia Pool events and produces SOURCE_TX_HASH candidates for the CreditScoreMVP prove step.",
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "index": "tsx src/index.ts",
     "index:watch": "tsx src/index.ts --watch",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "generate": "prisma generate",
-    "migrate": "prisma migrate deploy",
-    "studio": "npx prisma studio",
-    "postinstall": "prisma generate"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.2.0",
-    "@prisma/client": "^7.2.0",
+    "creditscore-db": "workspace:*",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.0",
     "pg": "^8.12.0"
@@ -25,7 +20,6 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/pg": "^8.21.0",
-    "prisma": "^7.2.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3"
   }

@@ -1,35 +1,41 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "indexer/.env") });
 
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, type IndexedEvent, type Prisma } from "@prisma/client";
-import { POINTS_BY_EVENT } from "./config";
+import { db } from "creditscore-db";
+import { POINTS_BY_EVENT } from "./config.js";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env");
 }
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
-
 export interface Checkpoint {
   lastIndexedBlock: number | null;
 }
 
-export type NewIndexedEvent = Omit<IndexedEvent, "id" | "createdAt">;
+export type NewIndexedEvent = Omit<
+  {
+    txHash: string;
+    logIndex: number;
+    blockNumber: number;
+    eventName: string;
+    wallet: string;
+    asset: string | null;
+    amount: string;
+    chain: string;
+    protocol: string;
+    timestamp: number | null;
+    proven: boolean;
+  },
+  "id" | "createdAt"
+>;
 
 export async function loadCheckpoint(chain: string, contractAddress: string): Promise<Checkpoint> {
-  const checkpoint = await prisma.indexerCheckpoint.findUnique({
-    where: {
-      chain_contractAddress: {
-        chain,
-        contractAddress,
-      },
-    },
-  });
+  const checkpoint = await db.orm.public.IndexerCheckpoint.where((c: any) => 
+    c.chain.eq(chain).and(c.contractAddress.eq(contractAddress))
+  ).first();
   return checkpoint || { lastIndexedBlock: null };
 }
 
@@ -38,53 +44,85 @@ export async function saveCheckpoint(
   contractAddress: string,
   lastIndexedBlock: number
 ): Promise<void> {
-  await prisma.indexerCheckpoint.upsert({
-    where: {
-      chain_contractAddress: {
-        chain,
-        contractAddress,
-      },
-    },
-    update: {
-      lastIndexedBlock,
-    },
+  await db.orm.public.IndexerCheckpoint.where((c: any) => 
+    c.chain.eq(chain).and(c.contractAddress.eq(contractAddress))
+  ).upsert({
     create: {
       chain,
       contractAddress,
       lastIndexedBlock,
     },
+    update: {
+      lastIndexedBlock,
+    },
   });
 }
 
-export async function loadEvents(): Promise<IndexedEvent[]> {
-  const events = await prisma.indexedEvent.findMany({
-    orderBy: [{ blockNumber: "asc" }, { logIndex: "asc" }],
-  });
+export async function loadEvents(): Promise<{
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+}[]> {
+  const events = await db.orm.public.IndexedEvent.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]).all();
   return events;
 }
 
-export async function saveEvent(eventData: NewIndexedEvent): Promise<IndexedEvent> {
-  const event = await prisma.indexedEvent.create({
-    data: eventData,
-  });
+export async function saveEvent(eventData: NewIndexedEvent): Promise<{
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+}> {
+  const event = await db.orm.public.IndexedEvent.create(eventData);
   // Award points unconditionally for new events
   await awardPoints(eventData.wallet, eventData.eventName);
   return event;
 }
 
-export async function upsertEvent(eventData: NewIndexedEvent): Promise<IndexedEvent> {
+export async function upsertEvent(eventData: NewIndexedEvent): Promise<{
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+}> {
   const { txHash, logIndex, ...rest } = eventData;
   
   // Check if event already exists before upsert
-  const existing = await prisma.indexedEvent.findUnique({
-    where: { txHash_logIndex: { txHash, logIndex } },
-    select: { id: true },
-  });
+  const existing = await db.orm.public.IndexedEvent.where((e: any) => 
+    e.txHash.eq(txHash).and(e.logIndex.eq(logIndex))
+  ).first();
 
-  const event = await prisma.indexedEvent.upsert({
-    where: {
-      txHash_logIndex: { txHash, logIndex },
-    },
+  const event = await db.orm.public.IndexedEvent.where((e: any) => 
+    e.txHash.eq(txHash).and(e.logIndex.eq(logIndex))
+  ).upsert({
     create: eventData,
     update: rest,
   });
@@ -101,56 +139,78 @@ export async function loadUnprovenEvents(
   limit = 10,
   chain: string | null = null,
   protocol: string | null = null
-): Promise<IndexedEvent[]> {
-  const where: Prisma.IndexedEventWhereInput = { proven: false };
+): Promise<{
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+}[]> {
+  const query = db.orm.public.IndexedEvent.where((e: any) => e.proven.eq(false));
   if (chain) {
-    where.chain = chain;
+    query.where((e: any) => e.chain.eq(chain));
   }
   if (protocol) {
-    where.protocol = protocol;
+    query.where((e: any) => e.protocol.eq(protocol));
   }
 
-  return prisma.indexedEvent.findMany({
-    where,
-    orderBy: [{ blockNumber: "asc" }, { logIndex: "asc" }],
-    take: limit,
-  });
+  return (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).take(limit).all();
 }
 
-export async function loadEventByTxHash(txHash: string | null | undefined): Promise<IndexedEvent | null> {
+export async function loadEventByTxHash(txHash: string | null | undefined): Promise<{
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
+} | null> {
   if (!txHash) return null;
-  return prisma.indexedEvent.findFirst({
-    where: { txHash: { equals: txHash, mode: "insensitive" } },
-  });
+  return db.orm.public.IndexedEvent.where((e: any) => 
+    e.txHash.ilike(txHash)
+  ).first();
 }
 
 export async function markProven(txHash: string): Promise<void> {
-  await prisma.indexedEvent.updateMany({
-    where: { txHash },
-    data: { proven: true },
-  });
+  await db.orm.public.IndexedEvent.where((e: any) => e.txHash.eq(txHash)).update({ proven: true });
 }
 
 export async function getSeenKeys(): Promise<Set<string>> {
-  const events = await prisma.indexedEvent.findMany({
-    select: {
-      txHash: true,
-      logIndex: true,
-    },
-  });
-  return new Set(events.map((e) => `${e.txHash}:${e.logIndex}`));
+  const events = await db.orm.public.IndexedEvent.select("txHash", "logIndex").all() as any[];
+  return new Set(events.map((e: any) => `${e.txHash}:${e.logIndex}`));
 }
 
 export async function disconnect(): Promise<void> {
-  await prisma.$disconnect();
+  // Prisma Next db client doesn't require explicit disconnect
+  // This function is kept for API compatibility
 }
 
 export async function awardPoints(wallet: string, eventName: string): Promise<void> {
   const points = POINTS_BY_EVENT[eventName];
   if (points === undefined || points === 0) return;
 
-  await prisma.registeredWallet.updateMany({
-    where: { wallet: { equals: wallet, mode: "insensitive" } },
-    data: { points: { increment: points } },
-  });
+  const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) => 
+    w.wallet.ilike(wallet)
+  ).first();
+
+  if (existingWallet) {
+    await db.orm.public.RegisteredWallet.where((w: any) => 
+      w.wallet.ilike(wallet)
+    ).update({ points: existingWallet.points + points });
+  }
 }

@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import { getWeights } from "../chain";
+import { getWeights } from "../chain.js";
 
 const router = express.Router();
 
