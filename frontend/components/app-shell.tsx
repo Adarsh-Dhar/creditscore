@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -31,6 +31,16 @@ function ShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [networkDropdownOpen, setNetworkDropdownOpen] = useState(false)
+  const [todayLabel, setTodayLabel] = useState('')
+
+  useEffect(() => {
+    setTodayLabel(new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }))
+  }, [])
 
   const {
     query, setQuery, handleSearch,
@@ -98,7 +108,7 @@ function ShellInner({ children }: { children: ReactNode }) {
           <div className="topbar-left">
             <button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
             <div>
-              <p className="eyebrow">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p className="eyebrow" aria-live="polite">{todayLabel}</p>
               <h1>{activeLabel === 'Overview' ? (currentAddress ? 'Wallet overview' : 'Good morning') : activeLabel}</h1>
             </div>
           </div>
