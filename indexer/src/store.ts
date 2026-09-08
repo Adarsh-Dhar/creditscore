@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import { Temporal } from "@js-temporal/polyfill";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env"), override: false });
 
 import { db } from "creditscore-db";
 import { POINTS_BY_EVENT } from "./config.js";

@@ -50,6 +50,13 @@ jobs:
       - name: Install dependencies (all workspaces)
         run: pnpm install --frozen-lockfile
 
+      - name: Apply database migrations
+        run: pnpm db:migrate
+        # Runs prisma db migrate against the Neon database via scripts/migrate.mjs.
+        # The wrapper script passes --db explicitly (bypasses dotenv) and exits
+        # non-zero if the migration fails (prisma RC exits 0 even on failure).
+        # Safe to re-run: migrations are idempotent (additive only).
+
       - name: Scan for new events (indexer)
         working-directory: indexer
         run: pnpm run index

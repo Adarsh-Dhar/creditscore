@@ -25,8 +25,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
-dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../.env"), override: false });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env"), override: false });
 
 import { db } from "creditscore-db";
 import { runOnce } from "./index.js";

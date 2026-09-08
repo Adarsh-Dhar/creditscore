@@ -63,7 +63,7 @@ In Node ESM, static `import` statements are hoisted and evaluated depth-first be
 
 **Build Command:**
 ```
-pnpm --filter creditscore-api... install --frozen-lockfile && pnpm --filter creditscore-api build
+pnpm --filter creditscore-api... install --frozen-lockfile && pnpm --filter creditscore-api build && pnpm db:migrate
 ```
 
 - `--filter creditscore-api...` (trailing `...`) installs `creditscore-api` and its workspace dependency `creditscore-db`.

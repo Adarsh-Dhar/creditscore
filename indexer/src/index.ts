@@ -17,7 +17,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../db/.env"), override: false });
 
 import { JsonRpcProvider, Contract, Interface, getAddress, isAddress, type Log, type Result } from "ethers";
 import { CHAINS, EVENT_NAME_MAP, CHUNK_SIZE, type ProtocolConfig, type ChainConfig } from "./config.js";
