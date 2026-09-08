@@ -8,7 +8,10 @@
     "build": "tsc -p tsconfig.json",
     "index": "tsx src/index.ts",
     "index:watch": "tsx src/index.ts --watch",
+    "realtime": "tsx src/main.ts",
     "start": "node dist/index.js",
+    "start:realtime": "node dist/main.js",
+    "test:errors": "tsx test-error-handling.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

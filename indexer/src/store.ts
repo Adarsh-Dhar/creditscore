@@ -3,11 +3,11 @@ import dotenv from "dotenv";
 import { Temporal } from "@js-temporal/polyfill";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), "indexer/.env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../db/.env") });
 
 import { db } from "creditscore-db";
 import { POINTS_BY_EVENT } from "./config.js";
+import { emitIndexed } from "./eventBus.js";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env");
@@ -15,6 +15,23 @@ if (!process.env.DATABASE_URL) {
 
 export interface Checkpoint {
   lastIndexedBlock: number | null;
+}
+
+// Shared row shape — was duplicated inline on every function below.
+export interface IndexedEventRow {
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  eventName: string;
+  wallet: string;
+  asset: string | null;
+  amount: string;
+  chain: string;
+  protocol: string;
+  timestamp: number | null;
+  proven: boolean;
+  createdAt: Date;
+  id: number;
 }
 
 export type NewIndexedEvent = Omit<
@@ -59,61 +76,23 @@ export async function saveCheckpoint(
   });
 }
 
-export async function loadEvents(): Promise<{
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-}[]> {
+export async function loadEvents(): Promise<IndexedEventRow[]> {
   const events = await db.orm.public.IndexedEvent.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]).all();
   return events;
 }
 
-export async function saveEvent(eventData: NewIndexedEvent): Promise<{
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-}> {
+export async function saveEvent(eventData: NewIndexedEvent): Promise<IndexedEventRow> {
   const event = await db.orm.public.IndexedEvent.create(eventData);
   // Award points unconditionally for new events
   await awardPoints(eventData.wallet, eventData.eventName);
+  // New row -> hand it to the prover. Every insertion path (live watch,
+  // one-shot `npm run index`, backfill) goes through here or upsertEvent,
+  // so this is the single choke point that feeds the prove stage.
+  if (!event.proven) emitIndexed(event);
   return event;
 }
 
-export async function upsertEvent(eventData: NewIndexedEvent): Promise<{
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-}> {
+export async function upsertEvent(eventData: NewIndexedEvent): Promise<IndexedEventRow> {
   const { txHash, logIndex, ...rest } = eventData;
   
   // Check if event already exists before upsert
@@ -125,9 +104,10 @@ export async function upsertEvent(eventData: NewIndexedEvent): Promise<{
     update: rest,
   });
 
-  // Only award points for new events (when existing was null)
+  // Only award points / notify the prover for new events (when existing was null)
   if (!existing) {
     await awardPoints(eventData.wallet, eventData.eventName);
+    if (!event.proven) emitIndexed(event);
   }
 
   return event;
@@ -137,21 +117,7 @@ export async function loadUnprovenEvents(
   limit = 10,
   chain: string | null = null,
   protocol: string | null = null
-): Promise<{
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-}[]> {
+): Promise<IndexedEventRow[]> {
   const query = db.orm.public.IndexedEvent.where((e: any) => e.proven.eq(false));
   if (chain) {
     query.where((e: any) => e.chain.eq(chain));
@@ -163,21 +129,7 @@ export async function loadUnprovenEvents(
   return (query.orderBy([(e: any) => e.blockNumber.asc(), (e: any) => e.logIndex.asc()]) as any).limit(limit).all();
 }
 
-export async function loadEventByTxHash(txHash: string | null | undefined): Promise<{
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-} | null> {
+export async function loadEventByTxHash(txHash: string | null | undefined): Promise<IndexedEventRow | null> {
   if (!txHash) return null;
   return db.orm.public.IndexedEvent.where((e: any) => 
     e.txHash.ilike(txHash)

@@ -34,8 +34,9 @@ import {
   extractWallet as extractMorphoWallet,
   extractAssetAndAmount as extractMorphoAssetAndAmount,
 } from "./morphoDecoder.js";
-import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent } from "./store.js";
+import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent, type IndexedEventRow } from "./store.js";
 import { db } from "creditscore-db";
+import { startWatchers, stopWatchers } from "./watch.js";
 
 // Helper functions for single transaction indexing
 function checksum(addr: string | null | undefined): string | null | undefined {
@@ -229,8 +230,18 @@ export async function indexSingleTx({
 
 // Retry configuration for RPC rate limiting
 const MAX_RETRIES = 5;
-const INITIAL_RETRY_DELAY = 1000; // 1 second
-const QUERY_DELAY = 500; // 500ms delay between event type queries
+const INITIAL_RETRY_DELAY = 5000; // 5 s base — doubles each retry (5, 10, 20, 40, 80 s)
+
+// Delay between successive queryFilter calls (one per event type per chunk).
+// Infura free tier: ~10 req/s sustained. Each queryFilter = 1 req, so
+// 2 s between event-type queries keeps us at ≤ 0.5 req/s for that loop.
+const QUERY_DELAY = Number(process.env.INDEXER_QUERY_DELAY_MS ?? 2_000);
+
+// Delay injected after each getTransaction + optional getBlock pair inside
+// the per-log loop. Prevents bursting when many logs land in one chunk.
+// 300 ms × 10 logs = 3 s overhead per event-type scan — negligible inside
+// a 60 s poll interval, but keeps us well under the rate limit.
+const LOG_DELAY = Number(process.env.INDEXER_LOG_DELAY_MS ?? 300);
 
 async function retryWithBackoff<T>(fn: () => Promise<T>, context = ""): Promise<T> {
   let lastError: unknown;
@@ -290,7 +301,7 @@ function resolveFromBlock({
   return latestBlock; // first-ever run, no config: start from "now"
 }
 
-async function runOnce(cli: CliArgs): Promise<number> {
+export async function runOnce(cli: CliArgs): Promise<number> {
   const seenKeys = await getSeenKeys();
 
   let totalNewCount = 0;
@@ -457,6 +468,10 @@ async function runOnce(cli: CliArgs): Promise<number> {
                     blockTimestampCache.set(log.blockNumber, timestamp);
                   }
 
+                  // Throttle: pause between per-log RPC calls to stay under
+                  // Infura's rate limit during high-activity scan windows.
+                  await new Promise((resolve) => setTimeout(resolve, LOG_DELAY));
+
                   await saveEvent({
                     txHash: log.transactionHash,
                     logIndex: log.index,
@@ -498,7 +513,22 @@ async function runOnce(cli: CliArgs): Promise<number> {
   return totalNewCount;
 }
 
-async function handleLiveLog(
+// Optional allow-list: TARGET_WALLETS=0xabc...,0xdef... in .env.
+// Empty/unset -> track every wallet interacting with the pool (current
+// default behavior, unchanged). Aave's Supply event doesn't index the
+// depositor, so this can't be pushed down into an RPC-level topic filter
+// for every event type — filtering after decode keeps behavior identical
+// across event types.
+const TARGET_WALLETS = (process.env.TARGET_WALLETS || "")
+  .split(",")
+  .map((w) => w.trim().toLowerCase())
+  .filter(Boolean);
+
+function isTrackedWallet(wallet: string): boolean {
+  return TARGET_WALLETS.length === 0 || TARGET_WALLETS.includes(wallet.toLowerCase());
+}
+
+export async function indexLiveLog(
   log: Log,
   contract: Contract,
   protocol: string,
@@ -538,6 +568,7 @@ async function handleLiveLog(
     // Decode the log
     const decoded = decodeParsedLog(parsed.name, parsed.args, protocol, chain);
     if (!decoded || !decoded.wallet) return;
+    if (!isTrackedWallet(decoded.wallet)) return;
 
     // Get block timestamp
     const block = await provider.getBlock(log.blockNumber);
@@ -568,88 +599,7 @@ async function handleLiveLog(
   }
 }
 
-async function startLiveListeners(): Promise<Contract[]> {
-  const contracts: Contract[] = [];
-
-  for (const chainConfig of CHAINS) {
-    const { name: chain, rpcEnvVar, protocols } = chainConfig;
-    const rpcUrl = process.env[rpcEnvVar];
-
-    if (!rpcUrl) {
-      console.log(`Skipping ${chain} for live listening: missing ${rpcEnvVar} in .env`);
-      continue;
-    }
-
-    console.log(`\n=== Setting up live listeners for chain: ${chain} ===`);
-    const provider = new JsonRpcProvider(rpcUrl);
-
-    for (const protocolConfig of protocols) {
-      const { id: protocol, poolAddress: contractAddress, abi, wethGatewayAddress, wethGatewayAbi } =
-        protocolConfig;
-
-      if (!contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
-        console.log(`Skipping ${protocol} on ${chain}: pool address not configured`);
-        continue;
-      }
-
-      console.log(`Setting up listeners for ${protocol} (${contractAddress})`);
-
-      // Setup pool contract listeners
-      const poolContract = new Contract(contractAddress, abi, provider);
-      contracts.push(poolContract);
-
-      const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
-      const poolEventNames = protocolEventNames.filter((name) => !name.includes("ETH"));
-
-      for (const eventName of poolEventNames) {
-        poolContract.on(eventName, (...args) => {
-          const log = args[args.length - 1] as Log;
-          handleLiveLog(log, poolContract, protocol, chain, contractAddress, wethGatewayAddress);
-        });
-        console.log(`  → Listening for ${eventName} on pool`);
-      }
-
-      // Setup WETHGateway listeners for Aave
-      if (
-        protocol === "aave" &&
-        wethGatewayAddress &&
-        wethGatewayAddress !== "0x0000000000000000000000000000000000000000" &&
-        wethGatewayAbi
-      ) {
-        const gatewayContract = new Contract(wethGatewayAddress, wethGatewayAbi, provider);
-        contracts.push(gatewayContract);
-
-        const gatewayEventNames = protocolEventNames.filter((name) => name.includes("ETH"));
-
-        for (const eventName of gatewayEventNames) {
-          gatewayContract.on(eventName, (...args) => {
-            const log = args[args.length - 1] as Log;
-            handleLiveLog(log, gatewayContract, protocol, chain, wethGatewayAddress, contractAddress);
-          });
-          console.log(`  → Listening for ${eventName} on WETHGateway`);
-        }
-      }
-    }
-  }
-
-  return contracts;
-}
-
-function printSummary(eventStore: {
-  txHash: string;
-  logIndex: number;
-  blockNumber: number;
-  eventName: string;
-  wallet: string;
-  asset: string | null;
-  amount: string;
-  chain: string;
-  protocol: string;
-  timestamp: number | null;
-  proven: boolean;
-  createdAt: Date;
-  id: number;
-}[]): void {
+function printSummary(eventStore: IndexedEventRow[]): void {
   const unproven = eventStore.filter((e) => !e.proven);
   if (unproven.length === 0) {
     console.log("No unproven events queued.");
@@ -657,21 +607,7 @@ function printSummary(eventStore: {
   }
 
   // Group by chain for better organization
-  const byChain: Record<string, {
-    txHash: string;
-    logIndex: number;
-    blockNumber: number;
-    eventName: string;
-    wallet: string;
-    asset: string | null;
-    amount: string;
-    chain: string;
-    protocol: string;
-    timestamp: number | null;
-    proven: boolean;
-    createdAt: Date;
-    id: number;
-  }[]> = {};
+  const byChain: Record<string, IndexedEventRow[]> = {};
   for (const e of unproven) {
     if (!byChain[e.chain]) {
       byChain[e.chain] = [];
@@ -694,50 +630,64 @@ function printSummary(eventStore: {
   );
 }
 
-async function main(): Promise<void> {
-  const cli = parseArgs();
+import { pathToFileURL } from "node:url";
 
-  // Connect to database before running any queries
-  console.log("Connecting to database...");
-  const runtime = await db.connect({ url: process.env.DATABASE_URL! });
-  console.log("Database connected successfully");
+// Run main() only when this file is the process entrypoint (`tsx src/index.ts` 
+// / `npm run index`), never when it's imported as a module — main.ts imports
+// runOnce/indexLiveLog from this file, and ES module top-level code runs on
+// *import*, not just on direct execution. Without this guard, main.ts's own
+// db.connect()/runOnce()/watch loop races against a second, independent copy
+// started by this file's unconditional main() call: two "Connecting to
+// database..." logs, two runOnce passes indexing the same blocks, and —
+// critically — this copy's `finally { await runtime.close(); }` tears down
+// the shared DB connection out from under main.ts's still-running watchers
+// and prover, which is what produced the "Postgres driver not connected"
+// crash.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  async function main(): Promise<void> {
+    const cli = parseArgs();
 
-  try {
-    if (cli.watch) {
-      console.log("Backfilling from last checkpoint...");
+    // Connect to database before running any queries
+    console.log("Connecting to database...");
+    const runtime = await db.connect({ url: process.env.DATABASE_URL! });
+    console.log("Database connected successfully");
+
+    try {
+      if (cli.watch) {
+        console.log("Backfilling from last checkpoint...");
+        await runOnce(cli);
+
+        const contracts = await startWatchers();
+        console.log("\nLive-listening for new events. Ctrl+C to stop.");
+
+        let shuttingDown = false;
+        const shutdown = () => {
+          if (shuttingDown) return;
+          shuttingDown = true;
+          console.log("\nShutdown requested, stopping listeners...");
+          stopWatchers(contracts)
+            .then(() => disconnect())
+            .then(() => runtime.close())
+            .finally(() => process.exit(0));
+        };
+        process.once("SIGINT", shutdown);
+        process.once("SIGTERM", shutdown);
+
+        return;
+      }
+
       await runOnce(cli);
-
-      const contracts = await startLiveListeners();
-      console.log("\nLive-listening for new events. Ctrl+C to stop.");
-
-      let shuttingDown = false;
-      const shutdown = () => {
-        if (shuttingDown) return;
-        shuttingDown = true;
-        console.log("\nShutdown requested, stopping listeners...");
-        Promise.all(contracts.map((c) => c.removeAllListeners()))
-          .then(() => disconnect())
-          .then(() => runtime.close())
-          .finally(() => process.exit(0));
-      };
-      process.once("SIGINT", shutdown);
-      process.once("SIGTERM", shutdown);
-
-      return;
+      const eventStore = await loadEvents();
+      printSummary(eventStore);
+      await disconnect();
+    } finally {
+      await runtime.close();
+      console.log("Database connection closed");
     }
-
-    await runOnce(cli);
-    const eventStore = await loadEvents();
-    printSummary(eventStore);
-    await disconnect();
-  } finally {
-    await runtime.close();
-    console.log("Database connection closed");
   }
-}
 
-// Run main function when executed directly
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

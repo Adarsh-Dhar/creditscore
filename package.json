@@ -28,6 +28,7 @@
     "morpho:add-collateral": "node scripts/lib/morpho.cjs add-collateral",
     "morpho:remove-collateral": "node scripts/lib/morpho.cjs remove-collateral",
     "index": "npm --prefix indexer run index",
+    "realtime": "npm --prefix indexer run realtime",
     "api": "npm --prefix api run dev",
     "contract:emit": "prisma contract emit",
     "run-all-tx": "node scripts/runAllTx.cjs",
