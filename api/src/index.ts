@@ -2,10 +2,6 @@
 import { Temporal } from '@js-temporal/polyfill';
 // @ts-expect-error - polyfilling the global
 globalThis.Temporal = Temporal;
-import path from "node:path";
-import dotenv from "dotenv";
-
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 import express, { type Request, type Response, type NextFunction, type ErrorRequestHandler } from "express";
 import cors from "cors";

@@ -2,11 +2,11 @@
   "name": "creditscore-db",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/prisma/db.ts",
+  "main": "src/prisma/db.js",
   "exports": {
     ".": {
       "types": "./src/prisma/db.d.ts",
-      "import": "./src/prisma/db.ts"
+      "import": "./src/prisma/db.js"
     }
   },
   "scripts": {
