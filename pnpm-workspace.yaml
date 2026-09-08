@@ -9,3 +9,5 @@ packages:
   - 'api'
   - 'indexer'
   - 'db'
+  - 'frontend'
+  - 'contracts'
