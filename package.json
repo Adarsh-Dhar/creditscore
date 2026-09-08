@@ -35,6 +35,7 @@
     "run-all-tx:aave": "node scripts/runAllTx.cjs aave",
     "run-all-tx:compound": "node scripts/runAllTx.cjs compound",
     "db:migrate": "node scripts/migrate.mjs"
+
   },
   "dependencies": {
     "@gluwa/usc-contracts": "^0.1.2",
