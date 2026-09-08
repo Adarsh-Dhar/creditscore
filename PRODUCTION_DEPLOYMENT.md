@@ -68,7 +68,8 @@ pnpm --filter creditscore-api... install --frozen-lockfile && pnpm --filter cred
 
 - `--filter creditscore-api...` (trailing `...`) installs `creditscore-api` and its workspace dependency `creditscore-db`.
 - The second command compiles `api/src/` → `api/dist/` via `tsc`.
-- `creditscore-db` does **not** need a separate build step — its `package.json` exports point at the pre-compiled `src/prisma/db.js`.
+- `creditscore-db` does not need a separate build step — its `package.json` exports point at the pre-compiled `src/prisma/db.js`.
+- `typescript`, `@types/express`, `@types/cors`, and `@types/node` live in `dependencies` so pnpm installs them even when Render sets `NODE_ENV=production`. This is intentional — `tsc` runs at build time, so type packages must be present.
 
 **Start Command:**
 ```

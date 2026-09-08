@@ -10,7 +10,7 @@ interface ChainStatus {
   currentBlock: number | null;
   lag: number | null;
   lagBehind: number | null;
-  updatedAt: Date;
+  updatedAt: string;
   error?: string;
 }
 
@@ -34,7 +34,7 @@ router.get("/status", async (req: Request, res: Response, next: NextFunction) =>
             currentBlock,
             lag,
             lagBehind: lag > 0 ? lag : 0,
-            updatedAt: checkpoint.updatedAt,
+            updatedAt: String(checkpoint.updatedAt),
           });
         } catch (error: any) {
           console.error(`Failed to get block number:`, error.message);
@@ -44,7 +44,7 @@ router.get("/status", async (req: Request, res: Response, next: NextFunction) =>
             currentBlock: null,
             lag: null,
             lagBehind: null,
-            updatedAt: checkpoint.updatedAt,
+            updatedAt: String(checkpoint.updatedAt),
             error: "Failed to fetch current block number",
           });
         }

@@ -1,6 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
-import { Temporal } from "@js-temporal/polyfill";
 import db from "../db.js";
 
 // Map DB eventName -> the stats bucket it belongs to
@@ -173,8 +172,8 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     // Upsert the wallet in RegisteredWallet
     const wallet = await db.orm.public.RegisteredWallet.upsert({
       conflictOn: { wallet: checksummedAddress },
-      create: { wallet: checksummedAddress, points: 0, lastSeenAt: Temporal.Now.instant() },
-      update: { lastSeenAt: Temporal.Now.instant() },
+      create: { wallet: checksummedAddress, points: 0, lastSeenAt: new Date().toISOString() },
+      update: { lastSeenAt: new Date().toISOString() },
     });
     res.json({
       wallet: wallet.wallet,
