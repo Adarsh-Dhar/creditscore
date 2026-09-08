@@ -1,0 +1,64 @@
+name: creditscore-indexer
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's minimum is 5 min, but schedules are
+    # best-effort and can lag under load — 15 min is a safe, low-noise choice.
+    - cron: "*/15 * * * *"
+
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+# Prevents two runs from ever executing at once. This is what replaces
+# Render's "Max Instances: 1" — proveQueue.cjs drives the prover wallet's
+# nonce sequentially, so overlapping runs would collide and drop proofs.
+concurrency:
+  group: creditscore-indexer
+  cancel-in-progress: false
+
+jobs:
+  index-and-prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SEPOLIA_RPC: ${{ secrets.SEPOLIA_RPC }}
+      CC3_TESTNET_SOURCE_RPC: ${{ secrets.CC3_TESTNET_SOURCE_RPC }}
+      CC3_TESTNET_RPC: ${{ secrets.CC3_TESTNET_RPC }}
+      CONTRACT_ADDRESS: ${{ secrets.CONTRACT_ADDRESS }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      PROVER_API_URL: ${{ secrets.PROVER_API_URL }}
+      # Optional pool address overrides — only needed if you're not using
+      # the defaults baked into indexer/src/config.ts
+      COMPOUND_SEPOLIA_COMET_USDC: ${{ secrets.COMPOUND_SEPOLIA_COMET_USDC }}
+      MORPHO_BLUE_SEPOLIA_ADDRESS: ${{ secrets.MORPHO_BLUE_SEPOLIA_ADDRESS }}
+      AAVE_SEPOLIA_WETHGATEWAY: ${{ secrets.AAVE_SEPOLIA_WETHGATEWAY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies (all workspaces)
+        run: pnpm install --frozen-lockfile
+
+      - name: Scan for new events (indexer)
+        working-directory: indexer
+        run: pnpm run index
+        # tsx runs src/index.ts directly — no build step needed.
+        # Resumes from the checkpoint already stored in Postgres.
+
+      - name: Submit batch proofs for anything unproven
+        run: node scripts/proveQueue.cjs
+        # Reads up to PROVE_BATCH_SIZE (default 10) unproven rows from the
+        # same DATABASE_URL and submits them in a shared batch tx per chain.
