@@ -7,13 +7,11 @@ import {
   walletSummary,
   walletEvents,
   leaderboard,
-  weights,
   chainsStatus,
   registerWallet,
   type WalletSummary,
   type IndexedEvent,
   type LeaderboardEntry,
-  type WeightsResponse,
   type ChainStatus,
   ApiError,
 } from './api'
@@ -22,7 +20,6 @@ type LoadingState = {
   summary: boolean
   events: boolean
   leaderboard: boolean
-  weights: boolean
   chains: boolean
 }
 
@@ -30,16 +27,7 @@ type ErrorState = {
   summary: string | null
   events: string | null
   leaderboard: string | null
-  weights: string | null
   chains: string | null
-}
-
-export interface ScoreFactor {
-  name: string
-  count: number
-  weight: number
-  contribution: number
-  tone: 'mint' | 'gold' | 'blue' | 'peach'
 }
 
 interface AppDataContextValue {
@@ -61,7 +49,6 @@ interface AppDataContextValue {
   summary: WalletSummary | null
   events: IndexedEvent[]
   leaderboardData: LeaderboardEntry[]
-  weightsData: WeightsResponse | null
   chainsData: ChainStatus[]
 
   loading: LoadingState
@@ -90,7 +77,6 @@ interface AppDataContextValue {
   getTxExplorerUrl: (chain: string, txHash: string) => string
 
   // derived
-  scoreComposition: ScoreFactor[]
   rankInfo: { rank: number; percentile: number } | null
   maxScore: number
   eventIcons: Record<string, any>
@@ -132,21 +118,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [summary, setSummary] = useState<WalletSummary | null>(null)
   const [events, setEvents] = useState<IndexedEvent[]>([])
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([])
-  const [weightsData, setWeightsData] = useState<WeightsResponse | null>(null)
   const [chainsData, setChainsData] = useState<ChainStatus[]>([])
 
   const [loading, setLoading] = useState<LoadingState>({
     summary: false,
     events: false,
     leaderboard: false,
-    weights: false,
     chains: false,
   })
   const [errors, setErrors] = useState<ErrorState>({
     summary: null,
     events: null,
     leaderboard: null,
-    weights: null,
     chains: null,
   })
 
@@ -178,26 +161,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return explorers[chain.toLowerCase()] || `https://etherscan.io/tx/${txHash}`
   }
 
-  // Load weights, chains and leaderboard once on mount
+  // Load chains and leaderboard once on mount
   useEffect(() => {
     const loadGlobalData = async () => {
-      setLoading(prev => ({ ...prev, weights: true, chains: true, leaderboard: true }))
+      setLoading(prev => ({ ...prev, chains: true, leaderboard: true }))
       try {
-        const [weightsRes, chainsRes, leaderboardRes] = await Promise.all([
-          weights().catch(e => { throw e }),
+        const [chainsRes, leaderboardRes] = await Promise.all([
           chainsStatus().catch(e => { throw e }),
           leaderboard().catch(e => { throw e }),
         ])
-        setWeightsData(weightsRes)
         setChainsData(chainsRes.chains)
         setLeaderboardData(leaderboardRes.leaderboard)
-        setErrors(prev => ({ ...prev, weights: null, chains: null, leaderboard: null }))
+        setErrors(prev => ({ ...prev, chains: null, leaderboard: null }))
       } catch (e: any) {
         const errorMsg = e instanceof ApiError ? e.message : 'Failed to connect to API'
-        setErrors(prev => ({ ...prev, weights: errorMsg, chains: errorMsg, leaderboard: errorMsg }))
+        setErrors(prev => ({ ...prev, chains: errorMsg, leaderboard: errorMsg }))
       } finally {
         setLoading(prev => ({ ...prev, weights: false, chains: false, leaderboard: false }))
       }
+      setLoading(prev => ({ ...prev, chains: false, leaderboard: false }))
     }
     loadGlobalData()
   }, [])
@@ -310,21 +292,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const scoreComposition = useMemo<ScoreFactor[]>(() => {
-    if (!summary || !weightsData) return []
-
-    const stats = summary.stats
-    const w = weightsData
-
-    return [
-      { name: 'Supply', count: parseInt(stats.supplyCount), weight: parseInt(w.supplyWeight), contribution: parseInt(stats.supplyCount) * parseInt(w.supplyWeight), tone: 'mint' as const },
-      { name: 'Borrow', count: parseInt(stats.borrowCount), weight: parseInt(w.borrowWeight), contribution: parseInt(stats.borrowCount) * parseInt(w.borrowWeight), tone: 'gold' as const },
-      { name: 'Repay', count: parseInt(stats.repayCount), weight: parseInt(w.repayWeight), contribution: parseInt(stats.repayCount) * parseInt(w.repayWeight), tone: 'blue' as const },
-      { name: 'Withdraw', count: parseInt(stats.withdrawCount), weight: parseInt(w.withdrawWeight), contribution: parseInt(stats.withdrawCount) * parseInt(w.withdrawWeight), tone: 'peach' as const },
-      { name: 'Liquidation', count: parseInt(stats.liquidationCount), weight: parseInt(w.liquidationWeight), contribution: parseInt(stats.liquidationCount) * parseInt(w.liquidationWeight), tone: 'peach' as const },
-    ].filter(item => item.count > 0)
-  }, [summary, weightsData])
-
   const rankInfo = useMemo(() => {
     if (!currentAddress || !leaderboardData.length) return null
     const entry = leaderboardData.find(e => e.wallet.toLowerCase() === currentAddress.toLowerCase())
@@ -356,7 +323,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     summary,
     events,
     leaderboardData,
-    weightsData,
     chainsData,
 
     loading,
@@ -381,7 +347,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     getBlockExplorerUrl,
     getTxExplorerUrl,
 
-    scoreComposition,
     rankInfo,
     maxScore,
     eventIcons,

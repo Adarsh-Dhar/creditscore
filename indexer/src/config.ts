@@ -128,12 +128,14 @@ export const EVENT_NAME_MAP: Record<string, Record<string, string>> = {
 
 export const CHUNK_SIZE: number = Number(process.env.INDEXER_CHUNK_SIZE || 5000);
 
+// Flat fallback values used when AI scoring fails (demo/testnet optimized)
+// These are positive to build up credit, avoiding negative rawScore issues
 export const POINTS_BY_EVENT: Record<string, number> = {
-  Supply: 5,
-  Borrow: 2,
-  Repay: 15,
-  Withdraw: 0,
-  LiquidationCall: -20,
+  Supply: 20,      // Positive for building credit
+  Borrow: 5,       // Small positive - borrows aren't inherently bad
+  Repay: 25,       // High positive for good repayment behavior
+  Withdraw: 5,     // Small positive for responsible unwinding
+  LiquidationCall: -30,  // Only liquidations are strongly negative
 };
 
 // Backward compatibility exports

@@ -53,6 +53,7 @@ export interface WalletSummary {
   address: string;
   score: string;
   rawScore: number;
+  netOutstandingUSD: number;
   stats: {
     supplyCount: string;
     borrowCount: string;
@@ -108,14 +109,6 @@ export interface RegisterWalletResponse {
   registered: boolean;
 }
 
-export interface WeightsResponse {
-  supplyWeight: string;
-  borrowWeight: string;
-  repayWeight: string;
-  withdrawWeight: string;
-  liquidationWeight: string;
-}
-
 export interface ChainStatus {
   chain: string;
   contractAddress: string;
@@ -156,10 +149,6 @@ export async function walletEvents(
 
 export async function leaderboard(): Promise<LeaderboardResponse> {
   return fetchAPI<LeaderboardResponse>('/api/leaderboard');
-}
-
-export async function weights(): Promise<WeightsResponse> {
-  return fetchAPI<WeightsResponse>('/api/weights');
 }
 
 export async function chainsStatus(): Promise<ChainsStatusResponse> {

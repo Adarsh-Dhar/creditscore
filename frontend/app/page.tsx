@@ -15,7 +15,6 @@ export default function OverviewPage() {
     loading,
     errors,
     handleRefresh,
-    scoreComposition,
     rankInfo,
     maxScore,
     selectedChain,
@@ -154,13 +153,13 @@ export default function OverviewPage() {
       <section className="panel factors-panel">
         {loading.summary ? (
           <div className="panel-loading"><LoadingSpinner size={24} /></div>
-        ) : scoreComposition.length > 0 ? (
+        ) : (
           <>
             <div className="factor-intro">
               <div className="factor-badge"><BarChart3 size={20} /></div>
               <div>
-                <h3>Score breakdown</h3>
-                <p>Your score is calculated from verified on-chain events.</p>
+                <h3>FICO-style Score Factors</h3>
+                <p>Your score combines Payment History (P) and Utilization (U) factors.</p>
               </div>
               <div className="factor-total">
                 <span>Total score</span>
@@ -168,28 +167,30 @@ export default function OverviewPage() {
               </div>
             </div>
             <div className="factor-list">
-              {scoreComposition.map((factor) => (
-                <div className="factor-row" key={factor.name}>
-                  <div className="factor-name">
-                    <span className={`factor-dot ${factor.tone}`} />
-                    <strong>{factor.name}</strong>
-                    <span className="factor-score">
-                      {factor.contribution > 0 ? '+' : ''}{factor.contribution}
-                    </span>
-                  </div>
-                  <div className="progress-track">
-                    <div
-                      className={`progress-fill ${factor.tone}`}
-                      style={{ width: `${Math.min(100, (factor.count / 10) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="factor-value">{factor.count} events</span>
+              <div className="factor-row">
+                <div className="factor-name">
+                  <span className="factor-dot mint" />
+                  <strong>Payment History (P)</strong>
+                  <span className="factor-score">55%</span>
                 </div>
-              ))}
+                <div className="progress-track">
+                  <div className="progress-fill mint" style={{ width: '55%' }} />
+                </div>
+                <span className="factor-value">AI-judged event severity</span>
+              </div>
+              <div className="factor-row">
+                <div className="factor-name">
+                  <span className="factor-dot gold" />
+                  <strong>Utilization (U)</strong>
+                  <span className="factor-score">45%</span>
+                </div>
+                <div className="progress-track">
+                  <div className="progress-fill gold" style={{ width: '45%' }} />
+                </div>
+                <span className="factor-value">Outstanding debt: ${summary?.netOutstandingUSD?.toFixed(2) || '0.00'}</span>
+              </div>
             </div>
           </>
-        ) : (
-          <EmptyState message="No activity contributing to score yet" />
         )}
       </section>
 

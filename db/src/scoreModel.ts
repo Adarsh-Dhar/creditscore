@@ -30,7 +30,9 @@ export const LOWER = 300;
 export const UPPER = 850;
 export const MID = (UPPER + LOWER) / 2;          // 575
 export const HALF_RANGE = (UPPER - LOWER) / 2;   // 275
-export const K = Number(process.env.SCORE_SENSITIVITY_K ?? 300);
+// K controls rawScore sensitivity. Lower value = more sensitive to small transactions.
+// Default 300 is for real loan sizes. Use ~30-50 for demo/testnet with dust amounts.
+export const K = Number(process.env.SCORE_SENSITIVITY_K ?? 50);
 
 /** @deprecated Superseded by computeFicoScore(). Kept for the unregistered
  *  wallet default and scripts/backfillRawScore.mjs's inverse-tanh math. */
@@ -44,16 +46,18 @@ export function boundedScore(rawScore: number): number {
 
 /** Points of uDrift lost per (USD of net debt * second) while netOutstandingUSD > 0.
  *  Default calibrated so a $1,000 unpaid debt costs roughly 1 uDrift-point/day:
- *  1000 * ALPHA * 86400 ≈ 1  =>  ALPHA ≈ 1 / (1000 * 86400). */
-export const ALPHA = Number(process.env.SCORE_DECAY_ALPHA ?? 1 / (1000 * 86400));
+ *  1000 * ALPHA * 86400 ≈ 1  =>  ALPHA ≈ 1 / (1000 * 86400).
+ *  For demo/testnet with smaller amounts, use ~1/10 of this rate. */
+export const ALPHA = Number(process.env.SCORE_DECAY_ALPHA ?? 1 / (10000 * 86400));
 
 /** Points of uDrift gained per second while debt-free (netOutstandingUSD <= 0).
  *  Deliberately much slower than a typical decay, so recovery is gradual
  *  and earned rather than instant — mirrors real bureaus' slow rebuild. */
-export const BETA = Number(process.env.SCORE_RECOVERY_BETA ?? 0.02 / 86400);
+export const BETA = Number(process.env.SCORE_RECOVERY_BETA ?? 0.002 / 86400);
 
-/** Sensitivity constant for squashing uDrift into the [0,1] U factor via tanh. */
-export const K_U = Number(process.env.SCORE_UTILIZATION_K ?? 50);
+/** Sensitivity constant for squashing uDrift into the [0,1] U factor via tanh.
+ *  Lower value = more sensitive to small uDrift changes. Default 50 works for demo/testnet. */
+export const K_U = Number(process.env.SCORE_UTILIZATION_K ?? 25);
 
 /**
  * Settles the Utilization drift accumulator from `lastCheckpointAt` up to
@@ -86,32 +90,19 @@ export function paymentHistoryFactor(rawScore: number): number {
   return 0.5 + 0.5 * Math.tanh(rawScore / K);
 }
 
-// Neutral placeholders until Length of history / New credit / Credit mix
-// are implemented. Kept as named constants (not inlined) so it's obvious
-// where to plug in real computations later.
-export const NEUTRAL_LENGTH_OF_HISTORY = 0.5; // L, 15%
-export const NEUTRAL_NEW_CREDIT = 0.5;        // N, 10%
-export const NEUTRAL_CREDIT_MIX = 0.5;        // M, 10%
-
-export const WEIGHT_P = 0.35;
-export const WEIGHT_U = 0.30;
-export const WEIGHT_L = 0.15;
-export const WEIGHT_N = 0.10;
-export const WEIGHT_M = 0.10;
+export const WEIGHT_P = 0.55;  // Payment History weight
+export const WEIGHT_U = 0.45;  // Utilization weight
+// L, N, M factors disabled until implemented - weights redistributed to P and U
 
 /**
  * Composite FICO-style score: 300 + 550 * weighted sum of factors.
- * P and U are the only two factors currently computed for real; L/N/M
- * stay neutral (0.5) until implemented.
+ * P (Payment History) and U (Utilization) are the only active factors.
+ * L, N, M factors are disabled until implemented - their weights were
+ * redistributed to P and U (55% and 45% respectively).
  */
 export function computeFicoScore(rawScore: number, uDrift: number): number {
   const P = paymentHistoryFactor(rawScore);
   const U = utilizationFactor(uDrift);
-  const composite =
-    WEIGHT_P * P +
-    WEIGHT_U * U +
-    WEIGHT_L * NEUTRAL_LENGTH_OF_HISTORY +
-    WEIGHT_N * NEUTRAL_NEW_CREDIT +
-    WEIGHT_M * NEUTRAL_CREDIT_MIX;
+  const composite = WEIGHT_P * P + WEIGHT_U * U;
   return LOWER + (UPPER - LOWER) * composite;
 }

@@ -70,11 +70,17 @@ export interface ScorableEvent {
 }
 
 function fallbackResult(event: ScorableEvent): AiScoreResult {
+  console.log(`[aiScorer] Using flat fallback for ${event.eventName}: ${POINTS_BY_EVENT[event.eventName]}`);
   return {
     importance: 5,
     reasoning: "fallback: AI scoring unavailable",
     rawDelta: POINTS_BY_EVENT[event.eventName] ?? 0,
   };
+}
+
+function fallbackResultBatch(events: ScorableEvent[]): AiScoreResult[] {
+  console.log(`[aiScorer] Using flat fallback for all ${events.length} events`);
+  return events.map(fallbackResult);
 }
 
 function clampResult(raw: unknown): { rawDelta: number; importance: number; reasoning: string } | null {
@@ -147,12 +153,14 @@ Respond with ONLY JSON, no other text:
 
   try {
     let response;
+    let usedThinkingConfig = true;
     try {
       response = await attempt(true);
     } catch (err) {
       if (isInvalidArgument(err)) {
         console.error(`[aiScorer] call rejected (${describeApiError(err)}), retrying without thinkingConfig`);
         response = await attempt(false);
+        usedThinkingConfig = false;
       } else {
         throw err;
       }
@@ -165,6 +173,7 @@ Respond with ONLY JSON, no other text:
     const clamped = clampResult(parsed);
     if (!clamped) throw new Error("non-numeric AI output");
 
+    console.log(`[aiScorer] AI scoring successful for ${event.eventName} (thinkingConfig=${usedThinkingConfig})`);
     return clamped;
   } catch (err) {
     console.error("[aiScorer] falling back to flat points:", describeApiError(err));
@@ -211,12 +220,14 @@ Respond with ONLY a JSON object mapping each index (as a string) to its result, 
 
   try {
     let response;
+    let usedThinkingConfig = true;
     try {
       response = await attempt(true);
     } catch (err) {
       if (isInvalidArgument(err)) {
         console.error(`[aiScorer] batch call rejected (${describeApiError(err)}), retrying without thinkingConfig`);
         response = await attempt(false);
+        usedThinkingConfig = false;
       } else {
         throw err;
       }
@@ -226,7 +237,7 @@ Respond with ONLY a JSON object mapping each index (as a string) to its result, 
     const cleaned = text.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
 
-    return events.map((event, i) => {
+    const results = events.map((event, i) => {
       const clamped = clampResult(parsed[String(i)]);
       if (!clamped) {
         console.error(`[aiScorer] batch entry ${i} missing/invalid, falling back for this item`);
@@ -234,8 +245,11 @@ Respond with ONLY a JSON object mapping each index (as a string) to its result, 
       }
       return clamped;
     });
+    
+    console.log(`[aiScorer] AI batch scoring successful for ${events.length} events (thinkingConfig=${usedThinkingConfig})`);
+    return results;
   } catch (err) {
     console.error("[aiScorer] batch call failed entirely, falling back for all items:", describeApiError(err));
-    return events.map(fallbackResult);
+    return fallbackResultBatch(events);
   }
 }
