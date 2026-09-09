@@ -69,15 +69,54 @@ contract CreditScoreMVP {
         uint64 repayCount;
         uint64 withdrawCount;
         uint64 liquidationCount;
+        uint40 firstSeenAt;        // timestamp of this wallet's first credited event — "length of credit history"
+        uint40 lastActivityAt;     // timestamp of most recent credited event — "recency"
+        uint8  protocolsUsedMask;  // bit0=Aave, bit1=Compound, bit2=Morpho — "credit mix"
     }
 
-    // Named weights — public so they're readable on-chain, not just implied
-    // by the formula in a doc somewhere.
+    // Category weights, in basis points out of 10_000, mirroring FICO's public
+    // breakdown (payment history ~35%, utilization/volume ~30%, history length
+    // ~15%, mix ~10%, recency ~10%). Public so the formula is inspectable
+    // on-chain, not just implied by a doc.
+    uint256 public constant WEIGHT_REPAYMENT_BPS = 3500;
+    uint256 public constant WEIGHT_ACTIVITY_BPS = 3000;
+    uint256 public constant WEIGHT_AGE_BPS = 1500;
+    uint256 public constant WEIGHT_MIX_BPS = 1000;
+    uint256 public constant WEIGHT_RECENCY_BPS = 1000;
+
+    // Raw per-action weights feeding the activity sub-score — same relative
+    // weights as before, but now capped rather than summed unboundedly.
     int256 public constant SUPPLY_WEIGHT = 5;
     int256 public constant BORROW_WEIGHT = 2;
     int256 public constant REPAY_WEIGHT = 15;
     int256 public constant WITHDRAW_WEIGHT = 0; // tracked, not yet scored
     int256 public constant LIQUIDATION_WEIGHT = -20;
+
+    // Diminishing returns: raw activity points beyond this cap stop adding
+    // to the activity sub-score. Prevents a spam loop of supply/repay from
+    // inflating score arbitrarily — same failure mode as the flat model had.
+    uint256 public constant ACTIVITY_RAW_CAP = 500;
+
+    // Account age fully matures (100% of the age sub-score) after this many
+    // seconds — 365 days. FICO treats long-established history as "enough,"
+    // not infinitely better the older it gets.
+    uint256 public constant AGE_MATURITY_SECONDS = 365 days;
+
+    // Recency: full marks if active within this window; decays linearly
+    // after that down to 0 (models FICO's payment-history recency weighting
+    // without needing per-event decay math).
+    uint256 public constant RECENCY_FULL_WINDOW_SECONDS = 90 days;
+    uint256 public constant RECENCY_DECAY_WINDOW_SECONDS = 180 days;
+
+    // Liquidation penalty is capped so one bad event can't be recovered from
+    // by no amount of future activity, but many liquidations also can't drag
+    // the score below the floor indefinitely in a way that hides all signal.
+    uint256 public constant MAX_LIQUIDATION_PENALTY = 200;
+
+    // Output range, matching the FICO/VantageScore convention lenders
+    // already recognize instead of an unbounded integer.
+    uint256 public constant SCORE_FLOOR = 300;
+    uint256 public constant SCORE_CEILING = 850;
 
     mapping(address => WalletStats) public stats;
     mapping(bytes32 => bool) public provenTxHashes;
@@ -307,7 +346,7 @@ contract CreditScoreMVP {
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven
         // This prevents corrupted state if transaction fails mid-execution
-        _creditWallet(wallet, actualEventType);
+        _creditWallet(wallet, actualEventType, protocolId);
         emit LoanEventProven(wallet, chainKey, blockHeight, txHashKey, actualEventType, protocolId);
         provenTxHashes[txHashKey] = true;
     }
@@ -391,14 +430,14 @@ contract CreditScoreMVP {
 
         // FIXED: Credit wallet and emit event BEFORE marking as proven
         // This prevents corrupted state if transaction fails mid-execution
-        _creditWallet(wallet, actualEventType);
+        _creditWallet(wallet, actualEventType, protocolId);
         emit LoanEventProven(wallet, chainKey, height, txHashKey, actualEventType, protocolId);
         provenTxHashes[txHashKey] = true;
     }
 
     /// @notice Internal helper to credit a wallet based on event type
     /// @dev Extracted from proveLoanEvent to avoid code duplication
-    function _creditWallet(address wallet, EventType eventType) internal {
+    function _creditWallet(address wallet, EventType eventType, uint8 protocolId) internal {
         WalletStats storage s = stats[wallet];
         if (eventType == EventType.Supply) {
             s.supplyCount += 1;
@@ -411,21 +450,101 @@ contract CreditScoreMVP {
         } else if (eventType == EventType.LiquidationCall) {
             s.liquidationCount += 1;
         }
+
+        if (s.firstSeenAt == 0) {
+            s.firstSeenAt = uint40(block.timestamp);
+        }
+        s.lastActivityAt = uint40(block.timestamp);
+        s.protocolsUsedMask |= uint8(1 << protocolId);
     }
 
-    /// @notice Weighted score, floored at 0. Same external signature as
-    /// before (`score(address) view returns (uint256)`) — off-chain scripts
-    /// that only ever called this getter don't need ABI changes.
+    /// @notice Number of distinct protocols a wallet has used (popcount of a
+    /// 3-bit mask) — feeds the "credit mix" sub-score.
+    function _protocolDiversityCount(uint8 mask) internal pure returns (uint256 count) {
+        if (mask & 0x1 != 0) count += 1;
+        if (mask & 0x2 != 0) count += 1;
+        if (mask & 0x4 != 0) count += 1;
+    }
+
+    /// @notice Normalized score in the 300-850 range (FICO/VantageScore
+    /// convention), built from five bounded 0-100 sub-scores instead of an
+    /// unbounded flat sum. Same external signature as before
+    /// `score(address) view returns (uint256)`) — off-chain code that only
+    /// calls this getter doesn't need ABI changes.
     function score(address wallet) external view returns (uint256) {
         WalletStats memory s = stats[wallet];
 
-        int256 raw = int256(uint256(s.supplyCount)) * SUPPLY_WEIGHT
+        // If the wallet has never been credited, it has no history —
+        // return the floor rather than fabricating a mid-range score.
+        if (s.firstSeenAt == 0) {
+            return SCORE_FLOOR;
+        }
+
+        // 1. Repayment behavior (35%): fraction of borrows actually repaid,
+        // capped at 100. A pure-supply wallet with no borrows has no debt
+        // risk to measure, so it scores full marks here rather than 0.
+        uint256 repaymentScore;
+        if (s.borrowCount == 0) {
+            repaymentScore = 100;
+        } else {
+            uint256 ratio = (uint256(s.repayCount) * 100) / uint256(s.borrowCount);
+            repaymentScore = ratio > 100 ? 100 : ratio;
+        }
+
+        // 2. Activity volume (30%): same relative per-action weights as
+        // before, but hard-capped so spamming one action type indefinitely
+        // stops adding score past ACTIVITY_RAW_CAP — diminishing returns
+        // instead of unbounded growth.
+        int256 rawActivity = int256(uint256(s.supplyCount)) * SUPPLY_WEIGHT
             + int256(uint256(s.borrowCount)) * BORROW_WEIGHT
             + int256(uint256(s.repayCount)) * REPAY_WEIGHT
-            + int256(uint256(s.withdrawCount)) * WITHDRAW_WEIGHT
-            + int256(uint256(s.liquidationCount)) * LIQUIDATION_WEIGHT;
+            + int256(uint256(s.withdrawCount)) * WITHDRAW_WEIGHT;
+        uint256 clampedActivity = rawActivity > 0 ? uint256(rawActivity) : 0;
+        uint256 activityScore = clampedActivity > ACTIVITY_RAW_CAP
+            ? 100
+            : (clampedActivity * 100) / ACTIVITY_RAW_CAP;
 
-        return raw > 0 ? uint256(raw) : 0;
+        // 3. Account age (15%): matures linearly to 100% at AGE_MATURITY_SECONDS.
+        uint256 ageSeconds = block.timestamp - uint256(s.firstSeenAt);
+        uint256 ageScore = ageSeconds > AGE_MATURITY_SECONDS
+            ? 100
+            : (ageSeconds * 100) / AGE_MATURITY_SECONDS;
+
+        // 4. Protocol diversity / credit mix (10%): 0-3 protocols used.
+        uint256 diversityScore = (_protocolDiversityCount(s.protocolsUsedMask) * 100) / 3;
+
+        // 5. Recency (10%): full marks if active within the last 90 days,
+        // linearly decaying to 0 over the following 180 days.
+        uint256 idleSeconds = block.timestamp - uint256(s.lastActivityAt);
+        uint256 recencyScore;
+        if (idleSeconds <= RECENCY_FULL_WINDOW_SECONDS) {
+            recencyScore = 100;
+        } else {
+            uint256 pastFull = idleSeconds - RECENCY_FULL_WINDOW_SECONDS;
+            recencyScore = pastFull >= RECENCY_DECAY_WINDOW_SECONDS
+                ? 0
+                : 100 - (pastFull * 100) / RECENCY_DECAY_WINDOW_SECONDS;
+        }
+
+        // Combine into a single 0-100 composite via basis-point weights.
+        uint256 composite = (
+            repaymentScore * WEIGHT_REPAYMENT_BPS +
+            activityScore * WEIGHT_ACTIVITY_BPS +
+            ageScore * WEIGHT_AGE_BPS +
+            diversityScore * WEIGHT_MIX_BPS +
+            recencyScore * WEIGHT_RECENCY_BPS
+        ) / 10_000;
+
+        // Map 0-100 composite onto the SCORE_FLOOR-SCORE_CEILING output range.
+        uint256 scaled = SCORE_FLOOR + (composite * (SCORE_CEILING - SCORE_FLOOR)) / 100;
+
+        // Liquidations apply as a capped penalty on top of the composite —
+        // severe, but not an unrecoverable unbounded drag, and can't push
+        // below the floor.
+        uint256 penalty = uint256(s.liquidationCount) * uint256(-LIQUIDATION_WEIGHT);
+        if (penalty > MAX_LIQUIDATION_PENALTY) penalty = MAX_LIQUIDATION_PENALTY;
+
+        return scaled > SCORE_FLOOR + penalty ? scaled - penalty : SCORE_FLOOR;
     }
 
     /// @notice Raw per-type counts, for verification/debugging — lets you
@@ -437,5 +556,18 @@ contract CreditScoreMVP {
     {
         WalletStats memory s = stats[wallet];
         return (s.supplyCount, s.borrowCount, s.repayCount, s.withdrawCount, s.liquidationCount);
+    }
+
+    /// @notice The new fields backing the normalized score — age, recency,
+    /// and protocol diversity — kept as a separate getter so getStats()'s
+    /// existing external signature (and anything already calling it) stays
+    /// untouched.
+    function getExtendedStats(address wallet)
+        external
+        view
+        returns (uint40 firstSeenAt, uint40 lastActivityAt, uint8 protocolsUsedMask, uint256 protocolsUsedCount)
+    {
+        WalletStats memory s = stats[wallet];
+        return (s.firstSeenAt, s.lastActivityAt, s.protocolsUsedMask, _protocolDiversityCount(s.protocolsUsedMask));
     }
 }

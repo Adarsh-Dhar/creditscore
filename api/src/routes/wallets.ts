@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
 import db from "../db.js";
+import { getScore } from "../chain.js";
 
 // Map DB eventName -> the stats bucket it belongs to
 const EVENT_TO_STAT_KEY: Record<string, string> = {
@@ -11,13 +12,11 @@ const EVENT_TO_STAT_KEY: Record<string, string> = {
   LiquidationCall: "liquidationCount",
 };
 
-const EVENT_WEIGHTS: Record<string, number> = {
-  Supply: 5,
-  Borrow: 2,
-  Repay: 15,
-  Withdraw: 0,
-  LiquidationCall: -20,
-};
+// NOTE: the actual score formula lives ONLY in CreditScoreMVP.sol's score().
+// This route used to reimplement its own flat-weight copy of that formula
+// against the DB — a second version of the same math that had already
+// drifted out of sync with the contract. Don't reintroduce a JS copy here;
+// call getScore() below instead so there's exactly one source of truth.
 
 async function getStatsFromDb(wallet: string) {
   const events = await db.orm.public.IndexedEvent.where((e: any) => 
@@ -105,23 +104,18 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     }
     const checksummedAddress = ethers.getAddress(address);
 
-    // Get on-chain data in parallel
-    const [stats, unprovenCountResult] = await Promise.all([
+    // Get on-chain score + DB stats in parallel. Score comes straight from
+    // the contract (single source of truth) instead of being recomputed
+    // here — this is what stopped the API and contract formulas drifting.
+    const [stats, score, unprovenCountResult] = await Promise.all([
       getStatsFromDb(checksummedAddress),
+      getScore(checksummedAddress).catch(() => "0"),
       db.orm.public.IndexedEvent.where((e: any) => 
         e.wallet.ilike(checksummedAddress)
       ).where((e: any) => e.proven.eq(false)).aggregate((a: any) => ({ count: a.count() })).catch(() => ({ count: 0 })),
     ]);
 
     const unprovenCount = (unprovenCountResult as any).count || 0;
-
-    const score = (
-      parseInt(stats.supplyCount) * EVENT_WEIGHTS.Supply +
-      parseInt(stats.borrowCount) * EVENT_WEIGHTS.Borrow +
-      parseInt(stats.repayCount) * EVENT_WEIGHTS.Repay +
-      parseInt(stats.withdrawCount) * EVENT_WEIGHTS.Withdraw +
-      parseInt(stats.liquidationCount) * EVENT_WEIGHTS.LiquidationCall
-    ).toString();
 
     // Get last event timestamp
     const lastEvent = await db.orm.public.IndexedEvent.where((e: any) => 
