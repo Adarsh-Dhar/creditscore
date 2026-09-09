@@ -11,12 +11,16 @@
  *     reached under normal operation. If you see values routinely hitting it,
  *     revisit the prompt, not K.
  *   - temperature: 0 ensures deterministic output for the same event.
- *   - thinkingConfig: { thinkingBudget: 0 } disables gemini-2.5-flash's
- *     default "thinking" mode. Without this, thinking tokens are deducted
- *     from the SAME maxOutputTokens budget as the visible JSON answer, and
- *     can silently consume the whole budget — producing an empty or
- *     truncated response that fails to parse. This is a known Gemini 2.5
- *     gotcha, not an intermittent bug.
+ *   - thinkingConfig: { thinkingBudget: 0 } is intended to disable the
+ *     model's default "thinking" mode. Without this, thinking tokens are
+ *     deducted from the SAME maxOutputTokens budget as the visible JSON
+ *     answer, and can silently consume the whole budget — producing an
+ *     empty or truncated response that fails to parse. This was confirmed
+ *     behavior on gemini-2.5-flash; NOT yet reverified against the current
+ *     MODEL below (gemini-3.5-flash-lite) — if that model rejects or
+ *     ignores this field differently, attempt() below auto-retries without
+ *     it and logs which one failed, so check logs before assuming this
+ *     comment is still accurate.
  *   - On any parse/network error the function falls back to a flat
  *     POINTS_BY_EVENT value so scoring never silently drops.
  */
@@ -44,7 +48,7 @@ function getClient(): GoogleGenAI {
   return _genai;
 }
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.5-flash-lite";
 
 /** Maximum absolute rawDelta the AI is allowed to emit — circuit breaker only. */
 const CIRCUIT_BREAKER = 1000;
@@ -89,6 +93,31 @@ function clampResult(raw: unknown): { rawDelta: number; importance: number; reas
   };
 }
 
+/**
+ * Pulls every field Google's SDK error object might carry the real reason
+ * in — err.message alone is frequently just the generic "Request contains
+ * an invalid argument." with no actionable detail.
+ */
+function describeApiError(err: unknown): string {
+  const e = err as any;
+  const parts = [
+    e?.status !== undefined ? `status=${e.status}` : null,
+    e?.message,
+    e?.error?.message,
+    e?.error?.status,
+    e?.error?.details ? `details=${JSON.stringify(e.error.details)}` : null,
+    e?.response?.data ? `response=${JSON.stringify(e.response.data)}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" | ") : String(err);
+}
+
+/** True for the 400/INVALID_ARGUMENT shape Google returns for malformed
+ *  request bodies — as opposed to network errors, auth errors, etc. */
+function isInvalidArgument(err: unknown): boolean {
+  const e = err as any;
+  return e?.status === 400 || e?.error?.status === "INVALID_ARGUMENT";
+}
+
 /** Scores a single transaction. Kept for manual/one-off use; the indexer's
  *  hot path uses scoreWithAIBatch via the BatchQueue in store.ts instead. */
 export async function scoreWithAI(event: ScorableEvent): Promise<AiScoreResult> {
@@ -102,16 +131,32 @@ Transaction: ${event.eventName} of ${event.humanAmount} ${event.symbol} on ${eve
 Respond with ONLY JSON, no other text:
 {"importance": <integer 1-10>, "reasoning": "<one sentence, under 200 chars>", "raw_delta": <signed number>}`;
 
-  try {
-    const response = await getClient().models.generateContent({
+  const baseConfig = {
+    temperature: 0,
+    maxOutputTokens: TOKENS_PER_TX,
+  };
+
+  const attempt = (withThinkingConfig: boolean) =>
+    getClient().models.generateContent({
       model: MODEL,
       contents: prompt,
-      config: {
-        temperature: 0,
-        maxOutputTokens: TOKENS_PER_TX,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
+      config: withThinkingConfig
+        ? { ...baseConfig, thinkingConfig: { thinkingBudget: 0 } }
+        : baseConfig,
     });
+
+  try {
+    let response;
+    try {
+      response = await attempt(true);
+    } catch (err) {
+      if (isInvalidArgument(err)) {
+        console.error(`[aiScorer] call rejected (${describeApiError(err)}), retrying without thinkingConfig`);
+        response = await attempt(false);
+      } else {
+        throw err;
+      }
+    }
 
     const text = response.text ?? "";
     const cleaned = text.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -122,7 +167,7 @@ Respond with ONLY JSON, no other text:
 
     return clamped;
   } catch (err) {
-    console.error("[aiScorer] falling back to flat points:", err);
+    console.error("[aiScorer] falling back to flat points:", describeApiError(err));
     return fallbackResult(event);
   }
 }
@@ -150,16 +195,32 @@ ${txList}
 Respond with ONLY a JSON object mapping each index (as a string) to its result, no other text:
 {"0": {"importance": <integer 1-10>, "reasoning": "<one sentence, under 200 chars>", "raw_delta": <signed number>}, "1": {...}, ...}`;
 
-  try {
-    const response = await getClient().models.generateContent({
+  const baseConfig = {
+    temperature: 0,
+    maxOutputTokens: TOKENS_PER_TX * events.length,
+  };
+
+  const attempt = (withThinkingConfig: boolean) =>
+    getClient().models.generateContent({
       model: MODEL,
       contents: prompt,
-      config: {
-        temperature: 0,
-        maxOutputTokens: TOKENS_PER_TX * events.length,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
+      config: withThinkingConfig
+        ? { ...baseConfig, thinkingConfig: { thinkingBudget: 0 } }
+        : baseConfig,
     });
+
+  try {
+    let response;
+    try {
+      response = await attempt(true);
+    } catch (err) {
+      if (isInvalidArgument(err)) {
+        console.error(`[aiScorer] batch call rejected (${describeApiError(err)}), retrying without thinkingConfig`);
+        response = await attempt(false);
+      } else {
+        throw err;
+      }
+    }
 
     const text = response.text ?? "";
     const cleaned = text.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -174,7 +235,7 @@ Respond with ONLY a JSON object mapping each index (as a string) to its result, 
       return clamped;
     });
   } catch (err) {
-    console.error("[aiScorer] batch call failed entirely, falling back for all items:", err);
+    console.error("[aiScorer] batch call failed entirely, falling back for all items:", describeApiError(err));
     return events.map(fallbackResult);
   }
 }

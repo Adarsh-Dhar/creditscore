@@ -159,6 +159,18 @@ const steps = [
     name: 'Index aiScoreLog(wallet)',
     sql: `CREATE INDEX IF NOT EXISTS "aiScoreLog_wallet_idx" ON "public"."aiScoreLog" ("wallet")`,
   },
+  {
+    name: 'Add netOutstandingUSD to registeredWallet',
+    sql: `ALTER TABLE "public"."registeredWallet" ADD COLUMN IF NOT EXISTS "netOutstandingUSD" float8 NOT NULL DEFAULT 0`,
+  },
+  {
+    name: 'Add uDrift to registeredWallet',
+    sql: `ALTER TABLE "public"."registeredWallet" ADD COLUMN IF NOT EXISTS "uDrift" float8 NOT NULL DEFAULT 0`,
+  },
+  {
+    name: 'Add lastCheckpointAt to registeredWallet',
+    sql: `ALTER TABLE "public"."registeredWallet" ADD COLUMN IF NOT EXISTS "lastCheckpointAt" int4 NOT NULL DEFAULT 0`,
+  },
 ];
 
 async function run() {

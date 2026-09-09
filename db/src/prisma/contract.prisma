@@ -34,6 +34,23 @@ model RegisteredWallet {
   wallet     String   @unique
   points     Int      @default(0)
   rawScore   Float    @default(0)
+
+  // --- Continuous utilization (U) state ------------------------------
+  // netOutstandingUSD: cumulativeBorrowedUSD - cumulativeRepaidUSD, clamped
+  // at 0. This is the wallet's live unpaid-debt balance across all
+  // supported assets/protocols, converted to USD via priceOracle.ts.
+  netOutstandingUSD Float @default(0)
+  // uDrift: unbounded continuous accumulator for the Utilization factor.
+  // Decays while netOutstandingUSD > 0 (bigger debt => faster decay),
+  // recovers at a flat rate while debt-free. Settled lazily via a
+  // checkpoint-accumulator (see scoreModel.ts computeUtilizationDrift and
+  // store.ts) rather than a cron job.
+  uDrift Float @default(0)
+  // lastCheckpointAt: unix seconds of the last time uDrift was settled
+  // (on write, in store.ts) — read-time settlement in the API uses this
+  // plus `now` without persisting, so the score ticks live between events.
+  lastCheckpointAt Int @default(0)
+
   createdAt  DateTime @default(now())
   lastSeenAt temporal.updatedAt()
 }

@@ -10,4 +10,11 @@ export {
   HALF_RANGE,
   K,
   boundedScore,
+  ALPHA,
+  BETA,
+  K_U,
+  computeUtilizationDrift,
+  utilizationFactor,
+  paymentHistoryFactor,
+  computeFicoScore,
 } from "creditscore-db/scoreModel";

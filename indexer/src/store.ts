@@ -10,7 +10,8 @@ import { POINTS_BY_EVENT } from "./config.js";
 import { emitIndexed } from "./eventBus.js";
 import { resolveTokenMeta, humanAmount } from "./tokenMeta.js";
 import { scoreWithAI, scoreWithAIBatch } from "./aiScorer.js";
-import { boundedScore } from "./scoreModel.js";
+import { computeFicoScore, computeUtilizationDrift } from "./scoreModel.js";
+import { getPriceUSD } from "./priceOracle.js";
 import { BatchQueue } from "./batchQueue.js";
 
 if (!process.env.DATABASE_URL) {
@@ -189,19 +190,69 @@ export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<voi
   for (let i = 0; i < scorable.length; i++) {
     const eventData = scorable[i];
     const result = results[i];
+    const meta = metas[i];
 
     const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
       w.wallet.ilike(eventData.wallet)
     ).first();
 
+    // --- P (Payment History): unchanged AI-judged accumulator ---------
     const priorRaw = (existingWallet as any)?.rawScore ?? 0;
     const newRaw = priorRaw + result.rawDelta;
-    const newDisplay = boundedScore(newRaw);
+
+    // --- U (Utilization): continuous checkpoint-accumulator -----------
+    const now = eventData.timestamp ?? Math.floor(Date.now() / 1000);
+    const priorOutstanding = (existingWallet as any)?.netOutstandingUSD ?? 0;
+    const priorUDrift = (existingWallet as any)?.uDrift ?? 0;
+    // A wallet with no prior checkpoint (new registration, or pre-migration
+    // row with lastCheckpointAt=0) has no elapsed time to settle yet —
+    // anchor the checkpoint at `now` instead of drifting from the epoch.
+    const lastCheckpointAt = (existingWallet as any)?.lastCheckpointAt || now;
+
+    // 1. Settle drift up to *now* using the balance that existed BEFORE
+    //    this event (checkpoint-accumulator correctness rule — see
+    //    scoreModel.ts computeUtilizationDrift docs).
+    const settledUDrift = computeUtilizationDrift(priorUDrift, priorOutstanding, lastCheckpointAt, now);
+
+    // 2. THEN apply this event's effect on the debt balance itself.
+    const priceUSD = getPriceUSD(eventData.chain, eventData.asset!, meta.symbol);
+    const amountUSD = Number(humanAmount(eventData.amount, meta.decimals)) * priceUSD;
+
+    let newOutstanding = priorOutstanding;
+    if (eventData.eventName === "Borrow") {
+      newOutstanding = priorOutstanding + amountUSD;
+    } else if (eventData.eventName === "Repay") {
+      newOutstanding = Math.max(0, priorOutstanding - amountUSD);
+    } else if (eventData.eventName === "LiquidationCall") {
+      // The liquidator forcibly clears the debt on-chain; the one-time
+      // severity penalty for *how* it happened still comes through P via
+      // result.rawDelta (AI-scored / POINTS_BY_EVENT fallback).
+      newOutstanding = 0;
+    }
+    // Supply/Withdraw don't affect outstanding debt.
+
+    const newDisplay = computeFicoScore(newRaw, settledUDrift);
 
     if (existingWallet) {
       await db.orm.public.RegisteredWallet.where((w: any) =>
         w.wallet.ilike(eventData.wallet)
-      ).update({ rawScore: newRaw, points: Math.round(newDisplay) });
+      ).update({
+        rawScore: newRaw,
+        netOutstandingUSD: newOutstanding,
+        uDrift: settledUDrift,
+        lastCheckpointAt: now,
+        points: Math.round(newDisplay),
+      } as any);
+    } else {
+      // Create wallet if it doesn't exist
+      await db.orm.public.RegisteredWallet.create({
+        wallet: eventData.wallet,
+        rawScore: newRaw,
+        netOutstandingUSD: newOutstanding,
+        uDrift: settledUDrift,
+        lastCheckpointAt: now,
+        points: Math.round(newDisplay),
+      } as any);
     }
 
     await (db.orm.public as any).AiScoreLog.create({

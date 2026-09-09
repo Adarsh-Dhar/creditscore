@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { ethers } from "ethers";
 import { Temporal } from "@js-temporal/polyfill";
 import db from "../db.js";
-import { boundedScore } from "creditscore-db/scoreModel";
+import { boundedScore, computeFicoScore, computeUtilizationDrift } from "creditscore-db/scoreModel";
 
 // Map DB eventName -> the stats bucket it belongs to
 const EVENT_TO_STAT_KEY: Record<string, string> = {
@@ -41,15 +41,31 @@ async function getStatsFromDb(wallet: string) {
   return stats;
 }
 
-async function getScoreFromDb(wallet: string): Promise<{ score: number; rawScore: number }> {
+async function getScoreFromDb(
+  wallet: string
+): Promise<{ score: number; rawScore: number; netOutstandingUSD: number }> {
   const row = await db.orm.public.RegisteredWallet.where((w: any) =>
     w.wallet.ilike(wallet)
   ).first();
   if (!row) {
     // Unregistered wallet — return the neutral midpoint (575), not 0.
-    return { score: Math.round(boundedScore(0)), rawScore: 0 };
+    return { score: Math.round(boundedScore(0)), rawScore: 0, netOutstandingUSD: 0 };
   }
-  return { score: row.points, rawScore: (row as any).rawScore ?? 0 };
+
+  // The Utilization (U) factor decays/recovers continuously, so a wallet
+  // sitting on unpaid debt should show a lower score today than yesterday
+  // even with zero new transactions. Settle it live at read time — same
+  // checkpoint math the indexer uses on write, just not persisted here.
+  const rawScore = (row as any).rawScore ?? 0;
+  const netOutstandingUSD = (row as any).netOutstandingUSD ?? 0;
+  const priorUDrift = (row as any).uDrift ?? 0;
+  const lastCheckpointAt = (row as any).lastCheckpointAt || Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
+
+  const liveUDrift = computeUtilizationDrift(priorUDrift, netOutstandingUSD, lastCheckpointAt, now);
+  const liveScore = computeFicoScore(rawScore, liveUDrift);
+
+  return { score: Math.round(liveScore), rawScore, netOutstandingUSD };
 }
 
 const router: express.Router = express.Router();
@@ -154,6 +170,7 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
       address: checksummedAddress,
       score: scoreData.score.toString(),
       rawScore: scoreData.rawScore,
+      netOutstandingUSD: scoreData.netOutstandingUSD,
       stats,
       unprovenCount,
       lastEventAt: lastEvent?.timestamp ? new Date(lastEvent.timestamp * 1000).toISOString() : null,
