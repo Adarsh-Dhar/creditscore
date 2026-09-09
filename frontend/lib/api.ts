@@ -32,9 +32,13 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     if (error instanceof ApiError) {
       throw error;
     }
-    // Handle network errors or fetch failures
+    // Handle network errors or fetch failures (CORS block, server unreachable, DNS failure)
     if (error instanceof TypeError) {
-      throw new ApiError(`Cannot connect to API server at ${API_URL}. Start the backend with: cd api && pnpm run dev`, 0);
+      const isLocal = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
+      const hint = isLocal
+        ? 'Start the backend with: cd api && pnpm run dev'
+        : 'The API server may be down or unreachable. Check the API status link below.';
+      throw new ApiError(`Cannot connect to API server at ${API_URL}. ${hint}`, 0);
     }
     throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0);
   }

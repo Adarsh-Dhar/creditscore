@@ -18,11 +18,11 @@ const PORT = process.env.PORT || 3000;
 // CORS setup
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim())
-  : ["http://localhost:3000"];
+  : null; // null = allow all origins when CORS_ORIGINS is not set
 
 app.use(
   cors({
-    origin: corsOrigins,
+    origin: corsOrigins ?? true, // true reflects the request Origin back, effectively allowing all
     credentials: true,
   })
 );
@@ -75,7 +75,7 @@ app.use((req: Request, res: Response) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
-  console.log(`CORS origins: ${corsOrigins.join(", ")}`);
+  console.log(`CORS origins: ${corsOrigins ? corsOrigins.join(", ") : "* (all origins)"}`);
 
   // Validate database connection on startup
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("user:password")) {
