@@ -344,10 +344,24 @@
                   "kind": "scalar"
                 }
               },
+              "lastCheckpointAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
               "lastSeenAt": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              },
+              "netOutstandingUSD": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
                   "kind": "scalar"
                 }
               },
@@ -359,6 +373,13 @@
                 }
               },
               "rawScore": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
+              "uDrift": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/float8@1",
@@ -382,14 +403,23 @@
                 "id": {
                   "column": "id"
                 },
+                "lastCheckpointAt": {
+                  "column": "lastCheckpointAt"
+                },
                 "lastSeenAt": {
                   "column": "lastSeenAt"
+                },
+                "netOutstandingUSD": {
+                  "column": "netOutstandingUSD"
                 },
                 "points": {
                   "column": "points"
                 },
                 "rawScore": {
                   "column": "rawScore"
+                },
+                "uDrift": {
+                  "column": "uDrift"
                 },
                 "wallet": {
                   "column": "wallet"
@@ -679,9 +709,27 @@
                   "nativeType": "int4",
                   "nullable": false
                 },
+                "lastCheckpointAt": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
                 "lastSeenAt": {
                   "codecId": "pg/timestamptz-temporal@1",
                   "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "netOutstandingUSD": {
+                  "codecId": "pg/float8@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "float8",
                   "nullable": false
                 },
                 "points": {
@@ -694,6 +742,15 @@
                   "nullable": false
                 },
                 "rawScore": {
+                  "codecId": "pg/float8@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "float8",
+                  "nullable": false
+                },
+                "uDrift": {
                   "codecId": "pg/float8@1",
                   "default": {
                     "kind": "literal",

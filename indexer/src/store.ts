@@ -242,7 +242,7 @@ export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<voi
         uDrift: settledUDrift,
         lastCheckpointAt: now,
         points: Math.round(newDisplay),
-      } as any);
+      });
     } else {
       // Create wallet if it doesn't exist
       await db.orm.public.RegisteredWallet.create({
@@ -252,7 +252,7 @@ export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<voi
         uDrift: settledUDrift,
         lastCheckpointAt: now,
         points: Math.round(newDisplay),
-      } as any);
+      });
     }
 
     await (db.orm.public as any).AiScoreLog.create({

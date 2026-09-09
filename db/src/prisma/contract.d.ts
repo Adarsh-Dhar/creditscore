@@ -279,6 +279,9 @@ export type FieldOutputTypes = {
       readonly wallet: CodecTypes['pg/text@1']['output'];
       readonly points: CodecTypes['pg/int4@1']['output'];
       readonly rawScore: CodecTypes['pg/float8@1']['output'];
+      readonly netOutstandingUSD: CodecTypes['pg/float8@1']['output'];
+      readonly uDrift: CodecTypes['pg/float8@1']['output'];
+      readonly lastCheckpointAt: CodecTypes['pg/int4@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
     };
@@ -324,6 +327,9 @@ export type FieldInputTypes = {
       readonly wallet: CodecTypes['pg/text@1']['input'];
       readonly points: CodecTypes['pg/int4@1']['input'];
       readonly rawScore: CodecTypes['pg/float8@1']['input'];
+      readonly netOutstandingUSD: CodecTypes['pg/float8@1']['input'];
+      readonly uDrift: CodecTypes['pg/float8@1']['input'];
+      readonly lastCheckpointAt: CodecTypes['pg/int4@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
     };
@@ -367,9 +373,12 @@ export type StorageColumnTypes = {
     readonly registeredWallet: {
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
       readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly lastCheckpointAt: CodecTypes['pg/int4@1']['output'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
+      readonly netOutstandingUSD: CodecTypes['pg/float8@1']['output'];
       readonly points: CodecTypes['pg/int4@1']['output'];
       readonly rawScore: CodecTypes['pg/float8@1']['output'];
+      readonly uDrift: CodecTypes['pg/float8@1']['output'];
       readonly wallet: CodecTypes['pg/text@1']['output'];
     };
   };
@@ -412,9 +421,12 @@ export type StorageColumnInputTypes = {
     readonly registeredWallet: {
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
       readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly lastCheckpointAt: CodecTypes['pg/int4@1']['input'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
+      readonly netOutstandingUSD: CodecTypes['pg/float8@1']['input'];
       readonly points: CodecTypes['pg/int4@1']['input'];
       readonly rawScore: CodecTypes['pg/float8@1']['input'];
+      readonly uDrift: CodecTypes['pg/float8@1']['input'];
       readonly wallet: CodecTypes['pg/text@1']['input'];
     };
   };
@@ -682,6 +694,33 @@ type ContractBase = Omit<
                     readonly value: DefaultLiteralValue<'pg/float8@1', 0>;
                   };
                 };
+                readonly netOutstandingUSD: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/float8@1', 0>;
+                  };
+                };
+                readonly uDrift: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/float8@1', 0>;
+                  };
+                };
+                readonly lastCheckpointAt: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/int4@1', 0>;
+                  };
+                };
                 readonly createdAt: {
                   readonly nativeType: 'timestamptz';
                   readonly codecId: 'pg/timestamptz-temporal@1';
@@ -926,6 +965,18 @@ type ContractBase = Omit<
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
               };
+              readonly netOutstandingUSD: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly uDrift: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly lastCheckpointAt: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
               readonly createdAt: {
                 readonly nullable: false;
                 readonly type: {
@@ -950,6 +1001,9 @@ type ContractBase = Omit<
                 readonly wallet: { readonly column: 'wallet' };
                 readonly points: { readonly column: 'points' };
                 readonly rawScore: { readonly column: 'rawScore' };
+                readonly netOutstandingUSD: { readonly column: 'netOutstandingUSD' };
+                readonly uDrift: { readonly column: 'uDrift' };
+                readonly lastCheckpointAt: { readonly column: 'lastCheckpointAt' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly lastSeenAt: { readonly column: 'lastSeenAt' };
               };
