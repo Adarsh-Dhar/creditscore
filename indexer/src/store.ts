@@ -172,7 +172,12 @@ export async function awardPointsAI(eventData: NewIndexedEvent): Promise<void> {
  * prior value.
  */
 export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<void> {
-  const scorable = events.filter((e) => e.asset);
+  // Only score events for registered wallets to avoid auto-registering random blockchain addresses
+  // and wasting Gemini API quotas on third-party wallets.
+  const registeredWallets = await db.orm.public.RegisteredWallet.select("wallet").all();
+  const registeredSet = new Set((registeredWallets as any[]).map((w: any) => w.wallet.toLowerCase()));
+
+  const scorable = events.filter((e) => e.asset && registeredSet.has(e.wallet.toLowerCase()));
   if (scorable.length === 0) return;
 
   const metas = await Promise.all(
@@ -195,6 +200,10 @@ export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<voi
     const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
       w.wallet.ilike(eventData.wallet)
     ).first();
+
+    if (!existingWallet) {
+      continue;
+    }
 
     // --- P (Payment History): unchanged AI-judged accumulator ---------
     const priorRaw = (existingWallet as any)?.rawScore ?? 0;
@@ -233,27 +242,15 @@ export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<voi
 
     const newDisplay = computeFicoScore(newRaw, settledUDrift);
 
-    if (existingWallet) {
-      await db.orm.public.RegisteredWallet.where((w: any) =>
-        w.wallet.ilike(eventData.wallet)
-      ).update({
-        rawScore: newRaw,
-        netOutstandingUSD: newOutstanding,
-        uDrift: settledUDrift,
-        lastCheckpointAt: now,
-        points: Math.round(newDisplay),
-      });
-    } else {
-      // Create wallet if it doesn't exist
-      await db.orm.public.RegisteredWallet.create({
-        wallet: eventData.wallet,
-        rawScore: newRaw,
-        netOutstandingUSD: newOutstanding,
-        uDrift: settledUDrift,
-        lastCheckpointAt: now,
-        points: Math.round(newDisplay),
-      });
-    }
+    await db.orm.public.RegisteredWallet.where((w: any) =>
+      w.wallet.ilike(eventData.wallet)
+    ).update({
+      rawScore: newRaw,
+      netOutstandingUSD: newOutstanding,
+      uDrift: settledUDrift,
+      lastCheckpointAt: now,
+      points: Math.round(newDisplay),
+    });
 
     await (db.orm.public as any).AiScoreLog.create({
       wallet: eventData.wallet,

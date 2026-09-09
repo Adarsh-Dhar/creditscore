@@ -192,10 +192,18 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     }
     const checksummedAddress = ethers.getAddress(address);
 
-    // Upsert the wallet in RegisteredWallet
+    // Upsert the wallet in RegisteredWallet with neutral midpoint (575)
     const wallet = await db.orm.public.RegisteredWallet.upsert({
       conflictOn: { wallet: checksummedAddress },
-      create: { wallet: checksummedAddress, points: 0, lastSeenAt: Temporal.Now.instant() },
+      create: {
+        wallet: checksummedAddress,
+        points: Math.round(boundedScore(0)), // 575
+        rawScore: 0,
+        netOutstandingUSD: 0,
+        uDrift: 0,
+        lastCheckpointAt: Math.floor(Date.now() / 1000),
+        lastSeenAt: Temporal.Now.instant(),
+      },
       update: { lastSeenAt: Temporal.Now.instant() },
     });
     res.json({

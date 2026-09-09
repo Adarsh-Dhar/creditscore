@@ -12,7 +12,7 @@ await client.connect();
 
 console.log('Checking wallet data...\n');
 
-const { rows } = await client.query('SELECT wallet, points, rawScore, netOutstandingUSD, uDrift, lastCheckpointAt FROM "public"."registeredWallet" ORDER BY points DESC LIMIT 10');
+const { rows } = await client.query('SELECT "wallet", "points", "rawScore", "netOutstandingUSD", "uDrift", "lastCheckpointAt" FROM "public"."registeredWallet" ORDER BY "points" DESC LIMIT 10');
 
 console.log('Top 10 wallets by score:');
 console.table(rows);
@@ -26,7 +26,7 @@ if (wallet) {
 }
 
 console.log('\n--- Recent events for this wallet ---');
-const { rows: events } = await client.query('SELECT eventName, amount, asset, timestamp FROM "public"."indexedEvent" WHERE wallet ILIKE $1 ORDER BY blockNumber DESC LIMIT 10', ['%b8552e%']);
+const { rows: events } = await client.query('SELECT "eventName", "amount", "asset", "timestamp" FROM "public"."indexedEvent" WHERE "wallet" ILIKE $1 ORDER BY "blockNumber" DESC LIMIT 10', ['%b8552e%']);
 console.table(events);
 
 await client.end();

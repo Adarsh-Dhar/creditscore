@@ -41,11 +41,17 @@ if (rows.length === 0) {
 console.log(`Backfilling ${rows.length} wallet(s)...\n`);
 
 for (const { id, points } of rows) {
-  // Clamp strictly inside the open interval (300, 850) so atanh stays finite.
-  const clamped = Math.max(301, Math.min(849, points));
-  const x = (clamped - MID) / HALF;  // in (-1, 1)
-  const rawScore = K * Math.atanh(x);
-  const displayScore = Math.round(MID + HALF * Math.tanh(rawScore / K)); // always == clamped, but explicit
+  let rawScore = 0;
+  let displayScore = MID;
+
+  // If points is 0 or uninitialized, start at neutral midpoint (575 / rawScore 0)
+  if (points && points > 0 && points >= 300) {
+    const clamped = Math.max(305, Math.min(845, points));
+    const x = (clamped - MID) / HALF;  // in (-1, 1)
+    rawScore = K * Math.atanh(x);
+    displayScore = Math.round(MID + HALF * Math.tanh(rawScore / K));
+  }
+
   await client.query(
     'UPDATE "public"."registeredWallet" SET "rawScore" = $1, "points" = $2 WHERE id = $3',
     [rawScore, displayScore, id],
