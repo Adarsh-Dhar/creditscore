@@ -492,7 +492,7 @@ export async function runOnce(cli: CliArgs): Promise<number> {
               process.stdout.write("done\n");
             }
 
-            await saveCheckpoint(chain, contractAddress, latestBlock);
+            await saveCheckpoint(chain, contractAddr, latestBlock);
 
             console.log(
               `Indexed ${newCount} new event(s) for ${protocol} ${type} on ${chain}. Checkpoint advanced to block ${latestBlock}.`
@@ -589,9 +589,8 @@ export async function indexLiveLog(
       proven: false,
     });
 
-    // Advance checkpoint (use pool address for checkpoint regardless of which contract emitted the event)
-    const checkpointAddress = poolAddress || emittingContractAddr;
-    await saveCheckpoint(chain, checkpointAddress, log.blockNumber);
+    // Advance checkpoint for whichever contract emitted this event (pool or gateway).
+    await saveCheckpoint(chain, emittingContractAddr, log.blockNumber);
 
     console.log(`  → Live event: ${decoded.eventName} for ${decoded.wallet} in tx ${log.transactionHash.substring(0, 10)}...`);
   } catch (err: any) {

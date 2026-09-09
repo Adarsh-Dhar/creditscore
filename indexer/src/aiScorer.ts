@@ -22,7 +22,18 @@ import { POINTS_BY_EVENT } from "./config.js";
 // scoreWithAI() is first called.
 let _genai: GoogleGenAI | null = null;
 function getClient(): GoogleGenAI {
-  if (!_genai) _genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  if (!_genai) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "[aiScorer] GEMINI_API_KEY is not set. Add it to indexer/.env. " +
+        "Get a key at https://aistudio.google.com/apikey"
+      );
+    }
+    // Pass the key explicitly so the SDK never falls back to Application
+    // Default Credentials (ADC / gcloud login), which causes invalid_grant errors.
+    _genai = new GoogleGenAI({ apiKey });
+  }
   return _genai;
 }
 

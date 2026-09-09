@@ -123,8 +123,16 @@ async function main() {
         continue;
       }
 
+      // When batch size is 1, go straight to individual proofs — skip the batch
+      // API endpoint entirely rather than calling it and falling back on every event.
+      const useBatchPath = BATCH_SIZE > 1 && validEvents.length > 1;
+
       // Process batch for this chain:protocol
       let batchResult;
+      if (!useBatchPath) {
+        // Jump straight to individual proofs
+        batchResult = null;
+      } else
       try {
         batchResult = await processBatch(validEvents, {
           chain,
@@ -138,8 +146,11 @@ async function main() {
         });
       } catch (batchError) {
         console.log(`  ! batch processing failed, falling back to individual proofs: ${batchError.message}`);
-        
-        // Fallback to individual transaction proofs
+        batchResult = null;
+      }
+
+      if (batchResult === null) {
+        // Individual proof path — used when batch is disabled or batch API failed
         for (const event of validEvents) {
           try {
             console.log(`  processing individual tx: ${event.txHash.substring(0, 10)}...`);
@@ -171,7 +182,7 @@ async function main() {
             results.failed.push({ txHash: event.txHash, error: individualError.message });
           }
         }
-        continue; // Skip the batch result processing since we handled individually
+        continue;
       }
 
       // Mark processed events as proven in Postgres (only those actually processed)
