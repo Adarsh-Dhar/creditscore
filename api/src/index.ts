@@ -16,16 +16,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // CORS setup
-const corsOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim())
-  : null; // null = allow all origins when CORS_ORIGINS is not set
+// Set CORS_ORIGINS to a comma-separated list of allowed origins, or "*" to allow all.
+// If unset, defaults to allowing all origins.
+const rawCorsOrigins = process.env.CORS_ORIGINS?.trim();
+const corsOrigin: cors.CorsOptions["origin"] =
+  !rawCorsOrigins || rawCorsOrigins === "*"
+    ? true                                                   // allow all origins
+    : rawCorsOrigins.split(",").map((o) => o.trim());       // specific allow-list
 
-app.use(
-  cors({
-    origin: corsOrigins ?? true, // true reflects the request Origin back, effectively allowing all
-    credentials: true,
-  })
-);
+app.use(cors({ origin: corsOrigin, credentials: true }));
 
 // Body parsing
 app.use(express.json());
@@ -75,7 +74,7 @@ app.use((req: Request, res: Response) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
-  console.log(`CORS origins: ${corsOrigins ? corsOrigins.join(", ") : "* (all origins)"}`);
+  console.log(`CORS origins: ${!rawCorsOrigins || rawCorsOrigins === "*" ? "* (all origins)" : rawCorsOrigins}`);;
 
   // Validate database connection on startup
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("user:password")) {
