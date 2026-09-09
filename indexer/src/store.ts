@@ -8,6 +8,9 @@ dotenv.config({ path: path.resolve(process.cwd(), "../db/.env"), override: false
 import { db } from "creditscore-db";
 import { POINTS_BY_EVENT } from "./config.js";
 import { emitIndexed } from "./eventBus.js";
+import { resolveTokenMeta, humanAmount } from "./tokenMeta.js";
+import { scoreWithAI } from "./aiScorer.js";
+import { boundedScore } from "./scoreModel.js";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env");
@@ -84,7 +87,7 @@ export async function loadEvents(): Promise<IndexedEventRow[]> {
 export async function saveEvent(eventData: NewIndexedEvent): Promise<IndexedEventRow> {
   const event = await db.orm.public.IndexedEvent.create(eventData);
   // Award points unconditionally for new events
-  await awardPoints(eventData.wallet, eventData.eventName);
+  await awardPointsAI(eventData);
   // New row -> hand it to the prover. Every insertion path (live watch,
   // one-shot `npm run index`, backfill) goes through here or upsertEvent,
   // so this is the single choke point that feeds the prove stage.
@@ -106,7 +109,7 @@ export async function upsertEvent(eventData: NewIndexedEvent): Promise<IndexedEv
 
   // Only award points / notify the prover for new events (when existing was null)
   if (!existing) {
-    await awardPoints(eventData.wallet, eventData.eventName);
+    await awardPointsAI(eventData);
     if (!event.proven) emitIndexed(event);
   }
 
@@ -150,16 +153,54 @@ export async function disconnect(): Promise<void> {
   // This function is kept for API compatibility
 }
 
+export async function awardPointsAI(eventData: NewIndexedEvent): Promise<void> {
+  // Nothing to score without an asset/amount — wallet may not even be registered.
+  if (!eventData.asset) return;
+
+  const meta = await resolveTokenMeta(eventData.chain, eventData.asset);
+  const result = await scoreWithAI({
+    eventName: eventData.eventName,
+    protocol: eventData.protocol,
+    symbol: meta.symbol,
+    humanAmount: humanAmount(eventData.amount, meta.decimals),
+  });
+
+  const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
+    w.wallet.ilike(eventData.wallet)
+  ).first();
+
+  const priorRaw = (existingWallet as any)?.rawScore ?? 0;
+  const newRaw = priorRaw + result.rawDelta;
+  const newDisplay = boundedScore(newRaw);
+
+  if (existingWallet) {
+    await db.orm.public.RegisteredWallet.where((w: any) =>
+      w.wallet.ilike(eventData.wallet)
+    ).update({ rawScore: newRaw, points: Math.round(newDisplay) });
+  }
+
+  await (db.orm.public as any).AiScoreLog.create({
+    wallet: eventData.wallet,
+    eventName: eventData.eventName,
+    importance: result.importance,
+    reasoning: result.reasoning,
+    rawDelta: result.rawDelta,
+    newRawScore: newRaw,
+    newDisplayScore: newDisplay,
+  });
+}
+
+/** @deprecated Use awardPointsAI instead. Kept for API compatibility. */
 export async function awardPoints(wallet: string, eventName: string): Promise<void> {
   const points = POINTS_BY_EVENT[eventName];
   if (points === undefined || points === 0) return;
 
-  const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) => 
+  const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
     w.wallet.ilike(wallet)
   ).first();
 
   if (existingWallet) {
-    await db.orm.public.RegisteredWallet.where((w: any) => 
+    await db.orm.public.RegisteredWallet.where((w: any) =>
       w.wallet.ilike(wallet)
     ).update({ points: existingWallet.points + points });
   }

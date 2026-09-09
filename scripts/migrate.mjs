@@ -134,6 +134,31 @@ const steps = [
     name: 'Index indexedEvent(wallet)',
     sql: `CREATE INDEX IF NOT EXISTS "indexedEvent_wallet_idx_df52cf87"   ON "public"."indexedEvent" ("wallet")`,
   },
+  {
+    name: 'Add rawScore to registeredWallet',
+    sql: `ALTER TABLE "public"."registeredWallet" ADD COLUMN IF NOT EXISTS "rawScore" float8 NOT NULL DEFAULT 0`,
+  },
+  {
+    name: 'Create table aiScoreLog',
+    sql: `
+      CREATE TABLE IF NOT EXISTS "public"."aiScoreLog" (
+        "id"              SERIAL      NOT NULL,
+        "wallet"          text        NOT NULL,
+        "eventName"       text        NOT NULL,
+        "importance"      int4        NOT NULL,
+        "reasoning"       text        NOT NULL,
+        "rawDelta"        float8      NOT NULL,
+        "newRawScore"     float8      NOT NULL,
+        "newDisplayScore" float8      NOT NULL,
+        "createdAt"       timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY ("id")
+      )
+    `,
+  },
+  {
+    name: 'Index aiScoreLog(wallet)',
+    sql: `CREATE INDEX IF NOT EXISTS "aiScoreLog_wallet_idx" ON "public"."aiScoreLog" ("wallet")`,
+  },
 ];
 
 async function run() {

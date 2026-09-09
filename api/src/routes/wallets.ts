@@ -1,7 +1,8 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { ethers } from "ethers";
+import { Temporal } from "@js-temporal/polyfill";
 import db from "../db.js";
-import { getScore } from "../chain.js";
+import { boundedScore } from "creditscore-db/scoreModel";
 
 // Map DB eventName -> the stats bucket it belongs to
 const EVENT_TO_STAT_KEY: Record<string, string> = {
@@ -12,11 +13,10 @@ const EVENT_TO_STAT_KEY: Record<string, string> = {
   LiquidationCall: "liquidationCount",
 };
 
-// NOTE: the actual score formula lives ONLY in CreditScoreMVP.sol's score().
-// This route used to reimplement its own flat-weight copy of that formula
-// against the DB — a second version of the same math that had already
-// drifted out of sync with the contract. Don't reintroduce a JS copy here;
-// call getScore() below instead so there's exactly one source of truth.
+// NOTE: score now comes from RegisteredWallet.points, which the indexer's
+// awardPointsAI() writes after every new event via boundedScore(rawScore).
+// There is no longer a call to CreditScoreMVP.sol's score() in this route.
+// The on-chain contract is unused by the API going forward.
 
 async function getStatsFromDb(wallet: string) {
   const events = await db.orm.public.IndexedEvent.where((e: any) => 
@@ -39,6 +39,17 @@ async function getStatsFromDb(wallet: string) {
   }
 
   return stats;
+}
+
+async function getScoreFromDb(wallet: string): Promise<{ score: number; rawScore: number }> {
+  const row = await db.orm.public.RegisteredWallet.where((w: any) =>
+    w.wallet.ilike(wallet)
+  ).first();
+  if (!row) {
+    // Unregistered wallet — return the neutral midpoint (575), not 0.
+    return { score: Math.round(boundedScore(0)), rawScore: 0 };
+  }
+  return { score: row.points, rawScore: (row as any).rawScore ?? 0 };
 }
 
 const router: express.Router = express.Router();
@@ -104,12 +115,12 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
     }
     const checksummedAddress = ethers.getAddress(address);
 
-    // Get on-chain score + DB stats in parallel. Score comes straight from
-    // the contract (single source of truth) instead of being recomputed
-    // here — this is what stopped the API and contract formulas drifting.
-    const [stats, score, unprovenCountResult] = await Promise.all([
+    // Get DB score + DB stats in parallel. Score comes from RegisteredWallet.points
+    // (written by the indexer's awardPointsAI via boundedScore) — single source of
+    // truth, no contract call needed.
+    const [stats, scoreData, unprovenCountResult] = await Promise.all([
       getStatsFromDb(checksummedAddress),
-      getScore(checksummedAddress).catch(() => "0"),
+      getScoreFromDb(checksummedAddress),
       db.orm.public.IndexedEvent.where((e: any) => 
         e.wallet.ilike(checksummedAddress)
       ).where((e: any) => e.proven.eq(false)).aggregate((a: any) => ({ count: a.count() })).catch(() => ({ count: 0 })),
@@ -141,7 +152,8 @@ router.get("/:address/summary", async (req: Request, res: Response, next: NextFu
 
     res.json({
       address: checksummedAddress,
-      score,
+      score: scoreData.score.toString(),
+      rawScore: scoreData.rawScore,
       stats,
       unprovenCount,
       lastEventAt: lastEvent?.timestamp ? new Date(lastEvent.timestamp * 1000).toISOString() : null,
@@ -166,8 +178,8 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
     // Upsert the wallet in RegisteredWallet
     const wallet = await db.orm.public.RegisteredWallet.upsert({
       conflictOn: { wallet: checksummedAddress },
-      create: { wallet: checksummedAddress, points: 0, lastSeenAt: new Date().toISOString() },
-      update: { lastSeenAt: new Date().toISOString() },
+      create: { wallet: checksummedAddress, points: 0, lastSeenAt: Temporal.Now.instant() },
+      update: { lastSeenAt: Temporal.Now.instant() },
     });
     res.json({
       wallet: wallet.wallet,

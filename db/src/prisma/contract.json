@@ -4,6 +4,10 @@
   "target": "postgres",
   "profileHash": "3916f444a8a17ad749191acf9e08dad97d1a327b88c2f1d45d12f240296aa8b2",
   "roots": {
+    "aiScoreLog": {
+      "model": "AiScoreLog",
+      "namespace": "public"
+    },
     "indexedEvent": {
       "model": "IndexedEvent",
       "namespace": "public"
@@ -21,6 +25,107 @@
     "namespaces": {
       "public": {
         "models": {
+          "AiScoreLog": {
+            "fields": {
+              "createdAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              },
+              "eventName": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "importance": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "newDisplayScore": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
+              "newRawScore": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
+              "rawDelta": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
+              "reasoning": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "wallet": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "createdAt": {
+                  "column": "createdAt"
+                },
+                "eventName": {
+                  "column": "eventName"
+                },
+                "id": {
+                  "column": "id"
+                },
+                "importance": {
+                  "column": "importance"
+                },
+                "newDisplayScore": {
+                  "column": "newDisplayScore"
+                },
+                "newRawScore": {
+                  "column": "newRawScore"
+                },
+                "rawDelta": {
+                  "column": "rawDelta"
+                },
+                "reasoning": {
+                  "column": "reasoning"
+                },
+                "wallet": {
+                  "column": "wallet"
+                }
+              },
+              "namespaceId": "public",
+              "table": "aiScoreLog"
+            }
+          },
           "IndexedEvent": {
             "fields": {
               "amount": {
@@ -253,6 +358,13 @@
                   "kind": "scalar"
                 }
               },
+              "rawScore": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
               "wallet": {
                 "nullable": false,
                 "type": {
@@ -276,6 +388,9 @@
                 "points": {
                   "column": "points"
                 },
+                "rawScore": {
+                  "column": "rawScore"
+                },
                 "wallet": {
                   "column": "wallet"
                 }
@@ -293,6 +408,80 @@
       "public": {
         "entries": {
           "table": {
+            "aiScoreLog": {
+              "columns": {
+                "createdAt": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "eventName": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "importance": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "newDisplayScore": {
+                  "codecId": "pg/float8@1",
+                  "nativeType": "float8",
+                  "nullable": false
+                },
+                "newRawScore": {
+                  "codecId": "pg/float8@1",
+                  "nativeType": "float8",
+                  "nullable": false
+                },
+                "rawDelta": {
+                  "codecId": "pg/float8@1",
+                  "nativeType": "float8",
+                  "nullable": false
+                },
+                "reasoning": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "wallet": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [
+                {
+                  "columns": [
+                    "wallet"
+                  ],
+                  "name": "aiScoreLog_wallet_idx_df52cf87",
+                  "prefix": "aiScoreLog_wallet_idx",
+                  "unique": false
+                }
+              ],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": []
+            },
             "indexedEvent": {
               "columns": {
                 "amount": {
@@ -504,6 +693,15 @@
                   "nativeType": "int4",
                   "nullable": false
                 },
+                "rawScore": {
+                  "codecId": "pg/float8@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "float8",
+                  "nullable": false
+                },
                 "wallet": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
@@ -531,7 +729,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "5c8e0c48d4a69680a9052cc930dc7647fa7a192e8d9707e69cd57cc9f61b8d0e"
+    "storageHash": "128a29858c2285cb1a2a5adfc73f38791f2265c48c30615e0b7000743c65e02a"
   },
   "execution": {
     "executionHash": "e09700565d85b74e72d3c86018c904ad1a4c2c14041bce98d04c3c95853e9ba4",

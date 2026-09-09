@@ -77,7 +77,7 @@ export default function OverviewPage() {
             <div className="panel-loading"><LoadingSpinner size={24} /></div>
           ) : summary ? (
             <div className="score-main">
-              <ScoreRing score={parseInt(summary.score)} maxScore={maxScore} />
+              <ScoreRing score={parseInt(summary.score)} />
               <div className="score-meta">
                 {rankInfo ? (
                   <>

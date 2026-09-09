@@ -52,6 +52,7 @@ export interface HealthResponse {
 export interface WalletSummary {
   address: string;
   score: string;
+  rawScore: number;
   stats: {
     supplyCount: string;
     borrowCount: string;

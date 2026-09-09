@@ -2,11 +2,14 @@
 
 import { AlertCircle, Loader2 } from 'lucide-react'
 
-export function ScoreRing({ score, maxScore }: { score: number; maxScore: number }) {
+export function ScoreRing({ score }: { score: number }) {
+  const SCORE_MIN = 300
+  const SCORE_MAX = 850
   const radius = 78
   const circumference = 2 * Math.PI * radius
-  const effectiveMax = Math.max(maxScore, 1) // Prevent division by zero
-  const progress = circumference - (score / effectiveMax) * circumference
+  // Progress is fraction of the 300–850 range, never outside [0, 1]
+  const fraction = Math.min(1, Math.max(0, (score - SCORE_MIN) / (SCORE_MAX - SCORE_MIN)))
+  const progress = circumference - fraction * circumference
 
   return (
     <div className="score-ring" aria-label={`Credit score ${score}`}>
@@ -16,7 +19,7 @@ export function ScoreRing({ score, maxScore }: { score: number; maxScore: number
       </svg>
       <div className="score-copy">
         <span className="score-number">{score}</span>
-        <span className="score-label">Raw score</span>
+        <span className="score-label">Credit score</span>
       </div>
     </div>
   )

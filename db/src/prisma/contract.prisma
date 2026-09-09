@@ -33,6 +33,21 @@ model RegisteredWallet {
   id         Int      @id @default(autoincrement())
   wallet     String   @unique
   points     Int      @default(0)
+  rawScore   Float    @default(0)
   createdAt  DateTime @default(now())
   lastSeenAt temporal.updatedAt()
+}
+
+model AiScoreLog {
+  id              Int      @id @default(autoincrement())
+  wallet          String
+  eventName       String
+  importance      Int
+  reasoning       String
+  rawDelta        Float
+  newRawScore     Float
+  newDisplayScore Float
+  createdAt       DateTime @default(now())
+
+  @@index([wallet])
 }

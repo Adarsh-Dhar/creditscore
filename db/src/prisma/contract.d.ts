@@ -33,7 +33,7 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'5c8e0c48d4a69680a9052cc930dc7647fa7a192e8d9707e69cd57cc9f61b8d0e'>;
+  StorageHashBase<'128a29858c2285cb1a2a5adfc73f38791f2265c48c30615e0b7000743c65e02a'>;
 export type ExecutionHash =
   ExecutionHashBase<'e09700565d85b74e72d3c86018c904ad1a4c2c14041bce98d04c3c95853e9ba4'>;
 export type ProfileHash =
@@ -241,6 +241,17 @@ type DefaultLiteralValue<CodecId extends string, Encoded> = CodecId extends keyo
 
 export type FieldOutputTypes = {
   readonly public: {
+    readonly AiScoreLog: {
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly wallet: CodecTypes['pg/text@1']['output'];
+      readonly eventName: CodecTypes['pg/text@1']['output'];
+      readonly importance: CodecTypes['pg/int4@1']['output'];
+      readonly reasoning: CodecTypes['pg/text@1']['output'];
+      readonly rawDelta: CodecTypes['pg/float8@1']['output'];
+      readonly newRawScore: CodecTypes['pg/float8@1']['output'];
+      readonly newDisplayScore: CodecTypes['pg/float8@1']['output'];
+      readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
+    };
     readonly IndexedEvent: {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly txHash: CodecTypes['pg/text@1']['output'];
@@ -267,6 +278,7 @@ export type FieldOutputTypes = {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly wallet: CodecTypes['pg/text@1']['output'];
       readonly points: CodecTypes['pg/int4@1']['output'];
+      readonly rawScore: CodecTypes['pg/float8@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
     };
@@ -274,6 +286,17 @@ export type FieldOutputTypes = {
 };
 export type FieldInputTypes = {
   readonly public: {
+    readonly AiScoreLog: {
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly wallet: CodecTypes['pg/text@1']['input'];
+      readonly eventName: CodecTypes['pg/text@1']['input'];
+      readonly importance: CodecTypes['pg/int4@1']['input'];
+      readonly reasoning: CodecTypes['pg/text@1']['input'];
+      readonly rawDelta: CodecTypes['pg/float8@1']['input'];
+      readonly newRawScore: CodecTypes['pg/float8@1']['input'];
+      readonly newDisplayScore: CodecTypes['pg/float8@1']['input'];
+      readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
+    };
     readonly IndexedEvent: {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly txHash: CodecTypes['pg/text@1']['input'];
@@ -300,6 +323,7 @@ export type FieldInputTypes = {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly wallet: CodecTypes['pg/text@1']['input'];
       readonly points: CodecTypes['pg/int4@1']['input'];
+      readonly rawScore: CodecTypes['pg/float8@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
     };
@@ -307,6 +331,17 @@ export type FieldInputTypes = {
 };
 export type StorageColumnTypes = {
   readonly public: {
+    readonly aiScoreLog: {
+      readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
+      readonly eventName: CodecTypes['pg/text@1']['output'];
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly importance: CodecTypes['pg/int4@1']['output'];
+      readonly newDisplayScore: CodecTypes['pg/float8@1']['output'];
+      readonly newRawScore: CodecTypes['pg/float8@1']['output'];
+      readonly rawDelta: CodecTypes['pg/float8@1']['output'];
+      readonly reasoning: CodecTypes['pg/text@1']['output'];
+      readonly wallet: CodecTypes['pg/text@1']['output'];
+    };
     readonly indexedEvent: {
       readonly amount: CodecTypes['pg/text@1']['output'];
       readonly asset: CodecTypes['pg/text@1']['output'] | null;
@@ -334,12 +369,24 @@ export type StorageColumnTypes = {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['output'];
       readonly points: CodecTypes['pg/int4@1']['output'];
+      readonly rawScore: CodecTypes['pg/float8@1']['output'];
       readonly wallet: CodecTypes['pg/text@1']['output'];
     };
   };
 };
 export type StorageColumnInputTypes = {
   readonly public: {
+    readonly aiScoreLog: {
+      readonly createdAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
+      readonly eventName: CodecTypes['pg/text@1']['input'];
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly importance: CodecTypes['pg/int4@1']['input'];
+      readonly newDisplayScore: CodecTypes['pg/float8@1']['input'];
+      readonly newRawScore: CodecTypes['pg/float8@1']['input'];
+      readonly rawDelta: CodecTypes['pg/float8@1']['input'];
+      readonly reasoning: CodecTypes['pg/text@1']['input'];
+      readonly wallet: CodecTypes['pg/text@1']['input'];
+    };
     readonly indexedEvent: {
       readonly amount: CodecTypes['pg/text@1']['input'];
       readonly asset: CodecTypes['pg/text@1']['input'] | null;
@@ -367,6 +414,7 @@ export type StorageColumnInputTypes = {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly lastSeenAt: CodecTypes['pg/timestamptz-temporal@1']['input'];
       readonly points: CodecTypes['pg/int4@1']['input'];
+      readonly rawScore: CodecTypes['pg/float8@1']['input'];
       readonly wallet: CodecTypes['pg/text@1']['input'];
     };
   };
@@ -389,6 +437,71 @@ type ContractBase = Omit<
         readonly kind: 'postgres-schema';
         readonly entries: {
           readonly table: {
+            readonly aiScoreLog: {
+              columns: {
+                readonly id: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'function';
+                    readonly expression: 'autoincrement()';
+                  };
+                };
+                readonly wallet: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly eventName: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly importance: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+                readonly reasoning: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly rawDelta: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                };
+                readonly newRawScore: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                };
+                readonly newDisplayScore: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                };
+                readonly createdAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-temporal@1';
+                  readonly nullable: false;
+                  readonly default: { readonly kind: 'function'; readonly expression: 'now()' };
+                };
+              };
+              primaryKey: { readonly columns: readonly ['id'] };
+              uniques: readonly [];
+              indexes: readonly [
+                {
+                  readonly name: 'aiScoreLog_wallet_idx_df52cf87';
+                  readonly prefix: 'aiScoreLog_wallet_idx';
+                  readonly columns: readonly ['wallet'];
+                  readonly unique: false;
+                },
+              ];
+              foreignKeys: readonly [];
+            };
             readonly indexedEvent: {
               columns: {
                 readonly id: {
@@ -560,6 +673,15 @@ type ContractBase = Omit<
                     readonly value: DefaultLiteralValue<'pg/int4@1', 0>;
                   };
                 };
+                readonly rawScore: {
+                  readonly nativeType: 'float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/float8@1', 0>;
+                  };
+                };
                 readonly createdAt: {
                   readonly nativeType: 'timestamptz';
                   readonly codecId: 'pg/timestamptz-temporal@1';
@@ -600,11 +722,74 @@ type ContractBase = Omit<
       readonly namespace: 'public' & NamespaceId;
       readonly model: 'RegisteredWallet';
     };
+    readonly aiScoreLog: {
+      readonly namespace: 'public' & NamespaceId;
+      readonly model: 'AiScoreLog';
+    };
   };
   readonly domain: {
     readonly namespaces: {
       readonly public: {
         readonly models: {
+          readonly AiScoreLog: {
+            readonly fields: {
+              readonly id: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly wallet: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly eventName: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly importance: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly reasoning: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly rawDelta: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly newRawScore: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly newDisplayScore: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly createdAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-temporal@1';
+                };
+              };
+            };
+            readonly relations: Record<string, never>;
+            readonly storage: {
+              readonly table: 'aiScoreLog';
+              readonly namespaceId: 'public';
+              readonly fields: {
+                readonly id: { readonly column: 'id' };
+                readonly wallet: { readonly column: 'wallet' };
+                readonly eventName: { readonly column: 'eventName' };
+                readonly importance: { readonly column: 'importance' };
+                readonly reasoning: { readonly column: 'reasoning' };
+                readonly rawDelta: { readonly column: 'rawDelta' };
+                readonly newRawScore: { readonly column: 'newRawScore' };
+                readonly newDisplayScore: { readonly column: 'newDisplayScore' };
+                readonly createdAt: { readonly column: 'createdAt' };
+              };
+            };
+          };
           readonly IndexedEvent: {
             readonly fields: {
               readonly id: {
@@ -737,6 +922,10 @@ type ContractBase = Omit<
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
               };
+              readonly rawScore: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
               readonly createdAt: {
                 readonly nullable: false;
                 readonly type: {
@@ -760,6 +949,7 @@ type ContractBase = Omit<
                 readonly id: { readonly column: 'id' };
                 readonly wallet: { readonly column: 'wallet' };
                 readonly points: { readonly column: 'points' };
+                readonly rawScore: { readonly column: 'rawScore' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly lastSeenAt: { readonly column: 'lastSeenAt' };
               };
