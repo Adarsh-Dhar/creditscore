@@ -9,8 +9,9 @@ import { db } from "creditscore-db";
 import { POINTS_BY_EVENT } from "./config.js";
 import { emitIndexed } from "./eventBus.js";
 import { resolveTokenMeta, humanAmount } from "./tokenMeta.js";
-import { scoreWithAI } from "./aiScorer.js";
+import { scoreWithAI, scoreWithAIBatch } from "./aiScorer.js";
 import { boundedScore } from "./scoreModel.js";
+import { BatchQueue } from "./batchQueue.js";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not configured in .env");
@@ -37,7 +38,7 @@ export interface IndexedEventRow {
   id: number;
 }
 
-export type NewIndexedEvent = Omit<
+export type NewIndexedEvent = Omit <
   {
     txHash: string;
     logIndex: number;
@@ -86,8 +87,9 @@ export async function loadEvents(): Promise<IndexedEventRow[]> {
 
 export async function saveEvent(eventData: NewIndexedEvent): Promise<IndexedEventRow> {
   const event = await db.orm.public.IndexedEvent.create(eventData);
-  // Award points unconditionally for new events
-  await awardPointsAI(eventData);
+  // Enqueue for batched AI scoring instead of scoring inline — see
+  // aiScoreQueue below. Non-blocking: indexing doesn't wait on Gemini.
+  aiScoreQueue.enqueue(eventData);
   // New row -> hand it to the prover. Every insertion path (live watch,
   // one-shot `npm run index`, backfill) goes through here or upsertEvent,
   // so this is the single choke point that feeds the prove stage.
@@ -109,7 +111,7 @@ export async function upsertEvent(eventData: NewIndexedEvent): Promise<IndexedEv
 
   // Only award points / notify the prover for new events (when existing was null)
   if (!existing) {
-    await awardPointsAI(eventData);
+    aiScoreQueue.enqueue(eventData);
     if (!event.proven) emitIndexed(event);
   }
 
@@ -153,42 +155,72 @@ export async function disconnect(): Promise<void> {
   // This function is kept for API compatibility
 }
 
+/** Scores and applies a single event immediately. Kept for manual/one-off
+ *  use (e.g. a backfill script); the live indexer uses awardPointsAIBatch
+ *  via aiScoreQueue instead — see saveEvent/upsertEvent above. */
 export async function awardPointsAI(eventData: NewIndexedEvent): Promise<void> {
-  // Nothing to score without an asset/amount — wallet may not even be registered.
   if (!eventData.asset) return;
-
-  const meta = await resolveTokenMeta(eventData.chain, eventData.asset);
-  const result = await scoreWithAI({
-    eventName: eventData.eventName,
-    protocol: eventData.protocol,
-    symbol: meta.symbol,
-    humanAmount: humanAmount(eventData.amount, meta.decimals),
-  });
-
-  const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
-    w.wallet.ilike(eventData.wallet)
-  ).first();
-
-  const priorRaw = (existingWallet as any)?.rawScore ?? 0;
-  const newRaw = priorRaw + result.rawDelta;
-  const newDisplay = boundedScore(newRaw);
-
-  if (existingWallet) {
-    await db.orm.public.RegisteredWallet.where((w: any) =>
-      w.wallet.ilike(eventData.wallet)
-    ).update({ rawScore: newRaw, points: Math.round(newDisplay) });
-  }
-
-  await (db.orm.public as any).AiScoreLog.create({
-    wallet: eventData.wallet,
-    eventName: eventData.eventName,
-    importance: result.importance,
-    reasoning: result.reasoning,
-    rawDelta: result.rawDelta,
-    newRawScore: newRaw,
-    newDisplayScore: newDisplay,
-  });
+  await awardPointsAIBatch([eventData]);
 }
+
+/**
+ * Scores a batch of events in one Gemini call, then applies each result to
+ * its wallet's rawScore/points sequentially (not Promise.all) — if two
+ * events in the same batch are for the same wallet, each must see the
+ * previous one's updated rawScore rather than both reading the same stale
+ * prior value.
+ */
+export async function awardPointsAIBatch(events: NewIndexedEvent[]): Promise<void> {
+  const scorable = events.filter((e) => e.asset);
+  if (scorable.length === 0) return;
+
+  const metas = await Promise.all(
+    scorable.map((e) => resolveTokenMeta(e.chain, e.asset!))
+  );
+  const results = await scoreWithAIBatch(
+    scorable.map((e, i) => ({
+      eventName: e.eventName,
+      protocol: e.protocol,
+      symbol: metas[i].symbol,
+      humanAmount: humanAmount(e.amount, metas[i].decimals),
+    }))
+  );
+
+  for (let i = 0; i < scorable.length; i++) {
+    const eventData = scorable[i];
+    const result = results[i];
+
+    const existingWallet = await db.orm.public.RegisteredWallet.where((w: any) =>
+      w.wallet.ilike(eventData.wallet)
+    ).first();
+
+    const priorRaw = (existingWallet as any)?.rawScore ?? 0;
+    const newRaw = priorRaw + result.rawDelta;
+    const newDisplay = boundedScore(newRaw);
+
+    if (existingWallet) {
+      await db.orm.public.RegisteredWallet.where((w: any) =>
+        w.wallet.ilike(eventData.wallet)
+      ).update({ rawScore: newRaw, points: Math.round(newDisplay) });
+    }
+
+    await (db.orm.public as any).AiScoreLog.create({
+      wallet: eventData.wallet,
+      eventName: eventData.eventName,
+      importance: result.importance,
+      reasoning: result.reasoning,
+      rawDelta: result.rawDelta,
+      newRawScore: newRaw,
+      newDisplayScore: newDisplay,
+    });
+  }
+}
+
+// Buffers new events for up to 60s (or 10 events, whichever comes first),
+// then scores the whole batch in one Gemini call via awardPointsAIBatch.
+// maxBatchSize mirrors PROVE_BATCH_SIZE's default in prove.ts, for the
+// same reason — bound the blast radius of one call.
+export const aiScoreQueue = new BatchQueue<NewIndexedEvent>(60_000, 10, awardPointsAIBatch);
 
 /** @deprecated Use awardPointsAI instead. Kept for API compatibility. */
 export async function awardPoints(wallet: string, eventName: string): Promise<void> {
