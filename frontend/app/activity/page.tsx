@@ -65,6 +65,7 @@ export default function ActivityPage() {
             <option value="aave">Aave</option>
             <option value="compound">Compound</option>
             <option value="morpho">Morpho</option>
+            <option value="liquity">Liquity</option>
           </select>
           <select
             className="filter-dropdown"

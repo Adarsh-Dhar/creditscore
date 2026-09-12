@@ -49,6 +49,18 @@ const MORPHO_SELECTORS = {
   "0xd8eabcb8": "LiquidationCall",
 };
 
+// Liquity V2 BorrowerOperations selectors — must match
+// contracts/CreditScoreMVP.sol's SEL_LIQUITY_* constants and
+// indexer/src/liquityDecoder.ts's LIQUITY_SELECTORS exactly.
+const LIQUITY_SELECTORS = {
+  "0x9cb90ba6": "Supply",   // openTrove
+  "0x59f54f40": "Supply",   // addColl
+  "0x580de360": "Withdraw", // withdrawColl
+  "0x90de348a": "Borrow",   // withdrawBold
+  "0x5cd067cf": "Repay",    // repayBold
+  "0x5aa6d461": "Withdraw", // closeTrove
+};
+
 function getRpcForChain(chain) {
   const envVar = `${chain.toUpperCase().replace(/-/g, "_")}_RPC`;
   const rpcUrl = process.env[envVar];
@@ -63,6 +75,7 @@ function eventNameFromCalldata(data, protocol) {
   const selector = data.slice(0, 10).toLowerCase();
   if (protocol === "compound") return COMPOUND_SELECTORS[selector] || null;
   if (protocol === "morpho") return MORPHO_SELECTORS[selector] || null;
+  if (protocol === "liquity") return LIQUITY_SELECTORS[selector] || null;
   return AAVE_SELECTORS[selector] || null;
 }
 
@@ -117,13 +130,15 @@ async function main() {
   const eventChain = indexed?.chain || chain;
 
   let eventName = EVENT_NAME || indexed?.eventName;
-  if (!eventName) {
+  let txFrom = null;
+  if (!eventName || (protocol === "liquity" && !indexed?.wallet && !TARGET_WALLET)) {
     const sourceProvider = new JsonRpcProvider(sourceRpc);
     const tx = await sourceProvider.getTransaction(sourceTxHash);
     if (!tx) {
       throw new Error(`Transaction not found on ${eventChain}: ${sourceTxHash}`);
     }
-    eventName = eventNameFromCalldata(tx.data, protocol);
+    if (!eventName) eventName = eventNameFromCalldata(tx.data, protocol);
+    txFrom = tx.from;
   }
 
   const eventType = EVENT_TYPE_INDEX[eventName];
@@ -133,7 +148,10 @@ async function main() {
     );
   }
 
-  const targetWallet = TARGET_WALLET || indexed?.wallet;
+  // Liquity has no "onBehalfOf"-style event arg to identify the wallet from
+  // — it's the transaction sender. Fall back to tx.from when neither
+  // TARGET_WALLET nor an indexed wallet is available.
+  const targetWallet = TARGET_WALLET || indexed?.wallet || (protocol === "liquity" ? txFrom : null);
   if (!targetWallet) {
     throw new Error("Set TARGET_WALLET in .env (or index the tx so the wallet is known).");
   }

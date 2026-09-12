@@ -49,6 +49,14 @@ async function main() {
   await contract.setPoolAddress(sepoliaChainKey, 2, morphoPoolAddress);
   console.log(`✓ Morpho Pool address set: ${morphoPoolAddress}`);
 
+  // Liquity BorrowerOperations (ETH branch) on Sepolia — this is what users
+  // call and what the on-chain contract validates tx.to against; the
+  // TroveManager event emitter address is only used off-chain by the
+  // indexer (see indexer/src/config.ts) and is never registered here.
+  const liquityBorrowerOperationsAddress = "0x2377B5a07bdfA02812203BAB749E7bD43E4c596c";
+  await contract.setPoolAddress(sepoliaChainKey, 3, liquityBorrowerOperationsAddress);
+  console.log(`✓ Liquity BorrowerOperations address set: ${liquityBorrowerOperationsAddress}`);
+
   // Aave WETHGateway on Sepolia
   const aaveWethGatewayAddress = "0x387d311e47e80b498169e6fb51d3193167d89F7D";
   await contract.setWETHGatewayAddress(sepoliaChainKey, 0, aaveWethGatewayAddress);

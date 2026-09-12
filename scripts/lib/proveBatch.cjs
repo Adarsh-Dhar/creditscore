@@ -32,6 +32,9 @@ const POOL_BY_CHAIN_AND_PROTOCOL = {
     aave: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
     compound: process.env.COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e",
     morpho: process.env.MORPHO_BLUE_SEPOLIA_ADDRESS || "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
+    // Liquity: BorrowerOperations (ETH branch) — what users call and what
+    // tx.to is validated against. NOT TroveManager (event emitter only).
+    liquity: process.env.LIQUITY_SEPOLIA_BORROWER_OPERATIONS || "0x2377B5a07bdfA02812203BAB749E7bD43E4c596c",
   },
   "cc3-testnet": {
     aave: process.env.CC3_LENDING_POOL_ADDRESS || "0x0000000000000000000000000000000000000000", // Placeholder - requires actual lending protocol deployment
@@ -50,6 +53,7 @@ const PROTOCOL_IDS = {
   aave: 0,
   compound: 1,
   morpho: 2,
+  liquity: 3,
 };
 
 // Chain ID mappings for supported chains

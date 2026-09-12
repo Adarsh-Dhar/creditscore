@@ -18,6 +18,13 @@
  * 10.  withdraw(USDC base asset)      → Borrow event  (base = Borrow in decoder)
  * 11.  withdraw(WETH collateral)      → Withdraw event
  *
+ *  ── Liquity V2, ETH branch (5 tx types) ────────────────────────────────────
+ * 12.  openTrove (coll + BOLD)        → Supply event
+ * 13.  addColl                        → Supply event  (second collateral op)
+ * 14.  withdrawBold                   → Borrow event
+ * 15.  repayBold                      → Repay event
+ * 16.  withdrawColl                   → Withdraw event
+ *
  * Morpho Blue is skipped — no markets exist on Sepolia.
  *
  * Execution order is intentional: collateral first, borrow only after
@@ -27,6 +34,7 @@
  *   node scripts/runAllTx.js               # run everything
  *   node scripts/runAllTx.js aave          # only Aave transactions
  *   node scripts/runAllTx.js compound      # only Compound transactions
+ *   node scripts/runAllTx.js liquity       # only Liquity transactions
  *   node scripts/runAllTx.js aave:supply   # single named step
  *
  * Environment (.env at repo root):
@@ -36,6 +44,9 @@
  *   AAVE_SEPOLIA_WETHGATEWAY   — Aave WETHGateway address (optional, has default)
  *   AAVE_SEPOLIA_USDC          — USDC address on Sepolia (optional, has default)
  *   COMPOUND_SEPOLIA_COMET_USDC — Compound Comet USDC market address
+ *   LIQUITY_SEPOLIA_BORROWER_OPERATIONS — Liquity BorrowerOperations address (optional, has default)
+ *   LIQUITY_SEPOLIA_COLL_TOKEN — Liquity ETH-branch collateral token (optional, has default)
+ *   LIQUITY_TROVE_ID           — set after step 12 runs once; required for steps 13-16
  */
 
 "use strict";
@@ -51,6 +62,9 @@ const {
   AAVE_SEPOLIA_WETHGATEWAY,
   AAVE_SEPOLIA_USDC,
   COMPOUND_SEPOLIA_COMET_USDC,
+  LIQUITY_SEPOLIA_BORROWER_OPERATIONS,
+  LIQUITY_SEPOLIA_COLL_TOKEN,
+  LIQUITY_TROVE_ID,
 } = process.env;
 
 // Aave V3 Sepolia defaults (from Aave address book)
@@ -64,6 +78,16 @@ const USDC_COMET     = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"; // USDC for
 
 // Compound Comet (USDC market)
 const COMET_ADDR     = COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e";
+
+// Liquity V2, ETH branch
+const LIQUITY_BORROWER_OPS = LIQUITY_SEPOLIA_BORROWER_OPERATIONS || "0x2377B5a07bdfA02812203BAB749E7bD43E4c596c";
+const LIQUITY_COLL_TOKEN   = LIQUITY_SEPOLIA_COLL_TOKEN || "0x2442cA14d1217b4dD503e47DFdF79b774b56Ea89";
+const LIQUITY_OPEN_COLL_AMOUNT  = "2000000000000000000";    // 2 collateral tokens (18 dec)
+const LIQUITY_OPEN_BOLD_AMOUNT  = "1800000000000000000000"; // 1800 BOLD (18 dec)
+const LIQUITY_ADD_COLL_AMOUNT   = "500000000000000000";     // 0.5 collateral token
+const LIQUITY_WITHDRAW_COLL_AMT = "200000000000000000";     // 0.2 collateral token
+const LIQUITY_WITHDRAW_BOLD_AMT = "100000000000000000000";  // 100 BOLD
+const LIQUITY_REPAY_BOLD_AMT    = "50000000000000000000";   // 50 BOLD
 
 // Min amounts (small so they work on testnet)
 const WETH_AMOUNT    = "2000000000000000";  // 0.002 WETH  (18 dec)
@@ -111,6 +135,18 @@ const IATOKENS_ABI = [
 
 const DEBT_TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
+];
+
+// Liquity V2 BorrowerOperations (ETH branch). openTrove's ABI here is
+// best-effort — see scripts/lib/liquity.cjs's header comment for the same
+// caveat; it's only exercised by step 12 below.
+const LIQUITY_BORROWER_OPS_ABI = [
+  "function openTrove(address _owner, uint256 _ownerIndex, uint256 _collAmount, uint256 _boldAmount, uint256 _upperHint, uint256 _lowerHint, uint256 _annualInterestRate, uint256 _maxUpfrontFee, address _addManager, address _removeManager, address _receiver) external returns (uint256)",
+  "function addColl(uint256 _troveId, uint256 _collAmount) external",
+  "function withdrawColl(uint256 _troveId, uint256 _collWithdrawal) external",
+  "function withdrawBold(uint256 _troveId, uint256 _boldAmount, uint256 _maxUpfrontFee) external",
+  "function repayBold(uint256 _troveId, uint256 _boldAmount) external",
+  "function closeTrove(uint256 _troveId) external",
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -355,6 +391,97 @@ async function compoundWithdrawWETH(provider, wallet) {
   await send("comet.withdraw(WETH)", cometW.withdraw(WETH_COMET, amount));
 }
 
+// ── Liquity transactions ─────────────────────────────────────────────────
+
+// Liquity troveId is deterministic: uint256(keccak256(abi.encode(owner,
+// ownerIndex))) — computed the same way BorrowerOperations does internally,
+// so we don't need to parse logs/return data to know it after opening.
+function computeLiquityTroveId(owner, ownerIndex) {
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+  const encoded = coder.encode(["address", "uint256"], [owner, ownerIndex]);
+  return BigInt(ethers.keccak256(encoded));
+}
+
+// Populated by liquityOpenTrove() so later steps in the same run don't need
+// LIQUITY_TROVE_ID set — falls back to the env var when steps are filtered
+// to run independently (e.g. `node scripts/runAllTx.js liquity:add-coll`).
+let liquityTroveId = LIQUITY_TROVE_ID ? BigInt(LIQUITY_TROVE_ID) : null;
+
+function requireLiquityTroveId() {
+  if (liquityTroveId == null) {
+    throw new Error(
+      "Liquity: no trove ID available — run liquity:open-trove first, or set LIQUITY_TROVE_ID in .env"
+    );
+  }
+  return liquityTroveId;
+}
+
+async function liquityOpenTrove(provider, wallet) {
+  console.log("\n[12/16] Liquity · openTrove (coll + BOLD)  →  Supply event");
+  const token = new ethers.Contract(LIQUITY_COLL_TOKEN, ERC20_ABI, provider);
+  const bal = await token.balanceOf(wallet.address);
+  const amount = clamp(LIQUITY_OPEN_COLL_AMOUNT, bal, "Liquity coll token");
+  await ensureApproval(provider, wallet, LIQUITY_COLL_TOKEN, LIQUITY_BORROWER_OPS, amount, "collToken → BorrowerOperations");
+
+  const borrowerOps = new ethers.Contract(LIQUITY_BORROWER_OPS, LIQUITY_BORROWER_OPS_ABI, wallet);
+  const ownerIndex = 0n;
+  await send(
+    "liquity.openTrove",
+    borrowerOps.openTrove(
+      wallet.address,
+      ownerIndex,
+      amount,
+      LIQUITY_OPEN_BOLD_AMOUNT,
+      0,
+      0,
+      ethers.parseUnits("0.05", 18), // 5% annual interest rate
+      ethers.MaxUint256,             // no cap on upfront fee
+      ethers.ZeroAddress,
+      ethers.ZeroAddress,
+      wallet.address
+    )
+  );
+
+  liquityTroveId = computeLiquityTroveId(wallet.address, ownerIndex);
+  console.log(`    troveId: ${liquityTroveId.toString()}`);
+  console.log(`    (set LIQUITY_TROVE_ID=${liquityTroveId.toString()} in .env to reuse this trove later)`);
+}
+
+async function liquityAddColl(provider, wallet) {
+  console.log("\n[13/16] Liquity · addColl  →  Supply event  (second collateral op)");
+  const troveId = requireLiquityTroveId();
+  const token = new ethers.Contract(LIQUITY_COLL_TOKEN, ERC20_ABI, provider);
+  const bal = await token.balanceOf(wallet.address);
+  const amount = clamp(LIQUITY_ADD_COLL_AMOUNT, bal, "Liquity coll token");
+  await ensureApproval(provider, wallet, LIQUITY_COLL_TOKEN, LIQUITY_BORROWER_OPS, amount, "collToken → BorrowerOperations");
+  const borrowerOps = new ethers.Contract(LIQUITY_BORROWER_OPS, LIQUITY_BORROWER_OPS_ABI, wallet);
+  await send("liquity.addColl", borrowerOps.addColl(troveId, amount));
+}
+
+async function liquityWithdrawBold(provider, wallet) {
+  console.log("\n[14/16] Liquity · withdrawBold  →  Borrow event");
+  const troveId = requireLiquityTroveId();
+  const borrowerOps = new ethers.Contract(LIQUITY_BORROWER_OPS, LIQUITY_BORROWER_OPS_ABI, wallet);
+  await send(
+    "liquity.withdrawBold",
+    borrowerOps.withdrawBold(troveId, LIQUITY_WITHDRAW_BOLD_AMT, ethers.MaxUint256)
+  );
+}
+
+async function liquityRepayBold(provider, wallet) {
+  console.log("\n[15/16] Liquity · repayBold  →  Repay event");
+  const troveId = requireLiquityTroveId();
+  const borrowerOps = new ethers.Contract(LIQUITY_BORROWER_OPS, LIQUITY_BORROWER_OPS_ABI, wallet);
+  await send("liquity.repayBold", borrowerOps.repayBold(troveId, LIQUITY_REPAY_BOLD_AMT));
+}
+
+async function liquityWithdrawColl(provider, wallet) {
+  console.log("\n[16/16] Liquity · withdrawColl  →  Withdraw event");
+  const troveId = requireLiquityTroveId();
+  const borrowerOps = new ethers.Contract(LIQUITY_BORROWER_OPS, LIQUITY_BORROWER_OPS_ABI, wallet);
+  await send("liquity.withdrawColl", borrowerOps.withdrawColl(troveId, LIQUITY_WITHDRAW_COLL_AMT));
+}
+
 // ── Step registry ──────────────────────────────────────────────────────────
 
 /**
@@ -375,6 +502,12 @@ const STEPS = [
   { key: "compound:supply-usdc",    protocol: "compound", fn: compoundSupplyUSDC  },
   { key: "compound:withdraw-usdc",  protocol: "compound", fn: compoundWithdrawUSDC},
   { key: "compound:withdraw-weth",  protocol: "compound", fn: compoundWithdrawWETH},
+  // Liquity (open first — everything else needs an existing troveId)
+  { key: "liquity:open-trove",      protocol: "liquity",  fn: liquityOpenTrove    },
+  { key: "liquity:add-coll",        protocol: "liquity",  fn: liquityAddColl      },
+  { key: "liquity:withdraw-bold",   protocol: "liquity",  fn: liquityWithdrawBold },
+  { key: "liquity:repay-bold",      protocol: "liquity",  fn: liquityRepayBold    },
+  { key: "liquity:withdraw-coll",   protocol: "liquity",  fn: liquityWithdrawColl },
 ];
 
 // ── Entry point ────────────────────────────────────────────────────────────
@@ -392,6 +525,7 @@ async function main() {
   console.log(`  Wallet : ${wallet.address}`);
   console.log(`  Aave   : ${AAVE_POOL}`);
   console.log(`  Comet  : ${COMET_ADDR}`);
+  console.log(`  Liquity: ${LIQUITY_BORROWER_OPS}`);
   console.log(`${"═".repeat(60)}`);
 
   // Determine which steps to run from CLI arg
@@ -401,12 +535,12 @@ async function main() {
     steps = STEPS.filter((s) => s.key === filter || s.protocol === filter);
     if (steps.length === 0) {
       console.error(`\nUnknown filter "${filter}". Valid options:`);
-      console.error("  aave  compound  " + STEPS.map((s) => s.key).join("  "));
+      console.error("  aave  compound  liquity  " + STEPS.map((s) => s.key).join("  "));
       process.exit(1);
     }
     console.log(`\nRunning ${steps.length} step(s) matching "${filter}"`);
   } else {
-    console.log(`\nRunning all ${steps.length} steps across Aave + Compound`);
+    console.log(`\nRunning all ${steps.length} steps across Aave + Compound + Liquity`);
   }
 
   const results = { ok: [], skipped: [], failed: [] };

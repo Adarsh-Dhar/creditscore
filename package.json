@@ -27,6 +27,13 @@
     "morpho:withdraw": "node scripts/lib/morpho.cjs withdraw",
     "morpho:add-collateral": "node scripts/lib/morpho.cjs add-collateral",
     "morpho:remove-collateral": "node scripts/lib/morpho.cjs remove-collateral",
+    "liquity": "node scripts/lib/liquity.cjs",
+    "liquity:open": "node scripts/lib/liquity.cjs open",
+    "liquity:add-coll": "node scripts/lib/liquity.cjs add-coll",
+    "liquity:withdraw-coll": "node scripts/lib/liquity.cjs withdraw-coll",
+    "liquity:withdraw-bold": "node scripts/lib/liquity.cjs withdraw-bold",
+    "liquity:repay-bold": "node scripts/lib/liquity.cjs repay-bold",
+    "liquity:close": "node scripts/lib/liquity.cjs close",
     "index": "npm --prefix indexer run index",
     "realtime": "npm --prefix indexer run realtime",
     "api": "npm --prefix api run dev",
@@ -34,6 +41,7 @@
     "run-all-tx": "node scripts/runAllTx.cjs",
     "run-all-tx:aave": "node scripts/runAllTx.cjs aave",
     "run-all-tx:compound": "node scripts/runAllTx.cjs compound",
+    "run-all-tx:liquity": "node scripts/runAllTx.cjs liquity",
     "db:migrate": "node scripts/migrate.mjs"
 
   },

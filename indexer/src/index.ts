@@ -34,6 +34,7 @@ import {
   extractWallet as extractMorphoWallet,
   extractAssetAndAmount as extractMorphoAssetAndAmount,
 } from "./morphoDecoder.js";
+import { decodeLiquityTx } from "./liquityDecoder.js";
 import { loadCheckpoint, saveCheckpoint, getSeenKeys, saveEvent, loadEvents, disconnect, upsertEvent, type NewIndexedEvent, type IndexedEventRow } from "./store.js";
 import { db } from "creditscore-db";
 import { startWatchers, stopWatchers } from "./watch.js";
@@ -81,6 +82,28 @@ function decodeParsedLog(
     wallet: checksum(wallet),
     asset: asset && isAddress(asset) ? checksum(asset) : asset,
     amount: amount != null ? String(amount) : null,
+  };
+}
+
+// Liquity has no event args to decode — wallet comes from tx.from and
+// eventType/asset/amount come straight from the transaction's calldata.
+// This mirrors decodeParsedLog's shape so call sites can treat it uniformly.
+function decodeLiquityFields(
+  txData: string | null | undefined,
+  txFrom: string,
+  protocolConfig: ProtocolConfig
+): DecodedFields | null {
+  const { eventName, asset, amount } = decodeLiquityTx(
+    txData,
+    protocolConfig.collToken,
+    protocolConfig.boldToken
+  );
+  if (!eventName) return null;
+  return {
+    eventName,
+    wallet: checksum(txFrom),
+    asset: asset && isAddress(asset) ? checksum(asset) : asset,
+    amount,
   };
 }
 
@@ -182,23 +205,46 @@ export async function indexSingleTx({
   const expected = expectedWallet ? checksum(expectedWallet) : null;
 
   const decoded: NewIndexedEvent[] = [];
-  for (const log of receipt.logs) {
-    if (!validTargets.includes(log.address.toLowerCase())) continue;
-    const fields = parseAndDecodeLog(log, protocol, protocolConfig, chain);
-    if (!fields || !fields.wallet) continue;
-    decoded.push({
-      txHash: receipt.hash,
-      logIndex: log.index,
-      blockNumber: receipt.blockNumber,
-      eventName: fields.eventName,
-      wallet: fields.wallet,
-      asset: fields.asset ?? null,
-      amount: fields.amount ?? "0",
-      chain,
-      protocol,
-      timestamp,
-      proven,
-    });
+
+  if (protocol === "liquity") {
+    // No event args to decode — one credited event per tx, straight from
+    // calldata + sender. logIndex is fabricated as 0 since there's no
+    // per-log identity to key off (see decodeLiquityFields).
+    const fields = decodeLiquityFields(tx.data, tx.from, protocolConfig);
+    if (fields && fields.wallet) {
+      decoded.push({
+        txHash: receipt.hash,
+        logIndex: 0,
+        blockNumber: receipt.blockNumber,
+        eventName: fields.eventName,
+        wallet: fields.wallet,
+        asset: fields.asset ?? null,
+        amount: fields.amount ?? "0",
+        chain,
+        protocol,
+        timestamp,
+        proven,
+      });
+    }
+  } else {
+    for (const log of receipt.logs) {
+      if (!validTargets.includes(log.address.toLowerCase())) continue;
+      const fields = parseAndDecodeLog(log, protocol, protocolConfig, chain);
+      if (!fields || !fields.wallet) continue;
+      decoded.push({
+        txHash: receipt.hash,
+        logIndex: log.index,
+        blockNumber: receipt.blockNumber,
+        eventName: fields.eventName,
+        wallet: fields.wallet,
+        asset: fields.asset ?? null,
+        amount: fields.amount ?? "0",
+        chain,
+        protocol,
+        timestamp,
+        proven,
+      });
+    }
   }
 
   let candidates = decoded;
@@ -301,6 +347,124 @@ function resolveFromBlock({
   return latestBlock; // first-ever run, no config: start from "now"
 }
 
+// Liquity has no usable event ABI to enumerate (see config.ts) — this scans
+// the TroveManager address for raw logs (as a "something happened here"
+// signal only) and decodes the underlying transaction's calldata directly,
+// exactly like indexLiveLiquityLog does for the live-listener path.
+async function scanLiquityForNewEvents(
+  provider: JsonRpcProvider,
+  chain: string,
+  protocolConfig: ProtocolConfig,
+  seenKeys: Set<string>,
+  cli: CliArgs
+): Promise<number> {
+  const { poolAddress, eventEmitterAddress } = protocolConfig;
+  if (!eventEmitterAddress || eventEmitterAddress === "0x0000000000000000000000000000000000000000") {
+    console.log(`Skipping liquity on ${chain}: eventEmitterAddress (TroveManager) not configured`);
+    return 0;
+  }
+
+  // Checkpointed under the emitter's address, same convention every other
+  // protocol/contract pair uses.
+  const checkpoint = await loadCheckpoint(chain, eventEmitterAddress);
+  const latestBlock = await retryWithBackoff(() => provider.getBlockNumber(), "getBlockNumber");
+  const fromBlock = resolveFromBlock({
+    cliFromBlock: cli.fromBlock,
+    checkpointBlock: checkpoint.lastIndexedBlock,
+    startBlockEnv: process.env[`START_BLOCK_${chain.toUpperCase()}`],
+    latestBlock,
+  });
+
+  if (fromBlock > latestBlock) {
+    console.log(
+      `Nothing to do for liquity on ${chain} — fromBlock (${fromBlock}) is ahead of latest (${latestBlock}).`
+    );
+    return 0;
+  }
+
+  console.log(`Indexing liquity (TroveManager ${eventEmitterAddress}) on ${chain}`);
+  console.log(`Range: ${fromBlock} -> ${latestBlock} (chunk size ${CHUNK_SIZE})`);
+
+  let newCount = 0;
+  const blockTimestampCache = new Map<number, number>();
+
+  for (let start = fromBlock; start <= latestBlock; start += CHUNK_SIZE) {
+    const end = Math.min(start + CHUNK_SIZE - 1, latestBlock);
+    process.stdout.write(` scanning ${start}-${end}...`);
+
+    let logs;
+    try {
+      logs = await retryWithBackoff(
+        () => provider.getLogs({ address: eventEmitterAddress, fromBlock: start, toBlock: end }),
+        `liquity logs (${start}-${end})`
+      );
+    } catch (err: any) {
+      console.error(`\n  ! getLogs(liquity, ${start}, ${end}) failed after retries: ${err.message}`);
+      console.error(`  Consider lowering INDEXER_CHUNK_SIZE (current: ${CHUNK_SIZE}) and re-running.`);
+      throw err;
+    }
+
+    // A single trove operation can emit more than one TroveManager log —
+    // dedupe to one decode-and-credit per transaction.
+    const txHashesInRange = Array.from(new Set(logs.map((l) => l.transactionHash)));
+
+    for (const txHash of txHashesInRange) {
+      const key = `${txHash}:0`; // no natural per-log index for a calldata-based decode
+      if (seenKeys.has(key)) continue;
+
+      const tx = await retryWithBackoff(
+        () => provider.getTransaction(txHash),
+        `getTransaction(${txHash})`
+      );
+      if (!tx || !tx.to) continue;
+
+      // Must target BorrowerOperations directly — same trustless-input
+      // guard as every other protocol, just against a different address
+      // than the one that emitted the log we noticed it from.
+      if (tx.to.toLowerCase() !== poolAddress.toLowerCase()) continue;
+
+      const fields = decodeLiquityFields(tx.data, tx.from, protocolConfig);
+      if (!fields || !fields.wallet) continue;
+
+      const blockNum = tx.blockNumber!;
+      let timestamp: number;
+      if (blockTimestampCache.has(blockNum)) {
+        timestamp = blockTimestampCache.get(blockNum)!;
+      } else {
+        const block = await retryWithBackoff(() => provider.getBlock(blockNum), `getBlock(${blockNum})`);
+        timestamp = block!.timestamp;
+        blockTimestampCache.set(blockNum, timestamp);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, LOG_DELAY));
+
+      await saveEvent({
+        txHash,
+        logIndex: 0,
+        blockNumber: blockNum,
+        eventName: fields.eventName,
+        wallet: fields.wallet,
+        asset: fields.asset ?? null,
+        amount: fields.amount ?? "0",
+        chain,
+        protocol: "liquity",
+        timestamp,
+        proven: false,
+      });
+      seenKeys.add(key);
+      newCount++;
+    }
+
+    process.stdout.write("done\n");
+  }
+
+  await saveCheckpoint(chain, eventEmitterAddress, latestBlock);
+  console.log(
+    `Indexed ${newCount} new event(s) for liquity on ${chain}. Checkpoint advanced to block ${latestBlock}.`
+  );
+  return newCount;
+}
+
 export async function runOnce(cli: CliArgs): Promise<number> {
   const seenKeys = await getSeenKeys();
 
@@ -331,6 +495,16 @@ export async function runOnce(cli: CliArgs): Promise<number> {
         }
 
         console.log(`Processing protocol: ${protocol} (${contractAddress})`);
+
+        if (protocol === "liquity") {
+          try {
+            const newCount = await scanLiquityForNewEvents(provider, chain, protocolConfig, seenKeys, cli);
+            totalNewCount += newCount;
+          } catch (err: any) {
+            console.error(`Error processing liquity on ${chain}: ${err.message}`);
+          }
+          continue;
+        }
 
         // For Aave, also process WETHGateway if configured
         const contractsToIndex: { type: "pool" | "gateway"; address: string; abi: string[] }[] = [];
@@ -595,6 +769,62 @@ export async function indexLiveLog(
     console.log(`  → Live event: ${decoded.eventName} for ${decoded.wallet} in tx ${log.transactionHash.substring(0, 10)}...`);
   } catch (err: any) {
     console.error(`  ! Error handling live log: ${err.message}`);
+  }
+}
+
+/**
+ * Live-listener path for Liquity. `log` here is a raw log from
+ * provider.on({address: eventEmitterAddress}) — TroveManager — used purely
+ * as a "something happened in this block" signal, since there's no usable
+ * event ABI to parse args from (see config.ts). The actual decode is the
+ * underlying transaction's calldata + sender, validated against
+ * BorrowerOperations (protocolConfig.poolAddress), exactly like the
+ * backfill path in scanLiquityForNewEvents.
+ */
+export async function indexLiveLiquityLog(
+  log: Log,
+  provider: JsonRpcProvider,
+  chain: string,
+  protocolConfig: ProtocolConfig
+): Promise<void> {
+  try {
+    const tx = await provider.getTransaction(log.transactionHash);
+    if (!tx || !tx.to) return;
+
+    if (tx.to.toLowerCase() !== protocolConfig.poolAddress.toLowerCase()) {
+      console.log(
+        `  → Skipping relayed tx ${log.transactionHash.substring(0, 10)}... (to: ${tx.to}, expected BorrowerOperations: ${protocolConfig.poolAddress})`
+      );
+      return;
+    }
+
+    const decoded = decodeLiquityFields(tx.data, tx.from, protocolConfig);
+    if (!decoded || !decoded.wallet) return;
+    if (!isTrackedWallet(decoded.wallet)) return;
+
+    const block = await provider.getBlock(log.blockNumber);
+    const timestamp = block?.timestamp ?? null;
+
+    await upsertEvent({
+      txHash: log.transactionHash,
+      logIndex: 0,
+      blockNumber: log.blockNumber,
+      eventName: decoded.eventName,
+      wallet: decoded.wallet,
+      asset: decoded.asset ?? null,
+      amount: decoded.amount ?? "0",
+      chain,
+      protocol: "liquity",
+      timestamp,
+      proven: false,
+    });
+
+    // Liquity has no gateway/pool split — checkpoint the emitter directly.
+    await saveCheckpoint(chain, protocolConfig.eventEmitterAddress!, log.blockNumber);
+
+    console.log(`  → Live event: ${decoded.eventName} for ${decoded.wallet} in tx ${log.transactionHash.substring(0, 10)}...`);
+  } catch (err: any) {
+    console.error(`  ! Error handling live liquity log: ${err.message}`);
   }
 }
 

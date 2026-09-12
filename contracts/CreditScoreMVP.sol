@@ -40,7 +40,8 @@ contract CreditScoreMVP {
     enum ProtocolId {
         Aave,      // 0
         Compound,  // 1
-        Morpho     // 2
+        Morpho,    // 2
+        Liquity    // 3
     }
 
     /// @notice Mapping of chain keys and protocol IDs to pool addresses. Only transactions sent to
@@ -71,7 +72,7 @@ contract CreditScoreMVP {
         uint64 liquidationCount;
         uint40 firstSeenAt;        // timestamp of this wallet's first credited event — "length of credit history"
         uint40 lastActivityAt;     // timestamp of most recent credited event — "recency"
-        uint8  protocolsUsedMask;  // bit0=Aave, bit1=Compound, bit2=Morpho — "credit mix"
+        uint8  protocolsUsedMask;  // bit0=Aave, bit1=Compound, bit2=Morpho, bit3=Liquity — "credit mix"
     }
 
     // Category weights, in basis points out of 10_000, mirroring FICO's public
@@ -153,6 +154,26 @@ contract CreditScoreMVP {
     bytes4 constant SEL_MORPHO_REPAY = 0x20b76e81;              // repay((address,address,address,address,uint256),uint256,uint256,address,bytes)
     bytes4 constant SEL_MORPHO_LIQUIDATE = 0xd8eabcb8;          // liquidate((address,address,address,address,uint256),address,uint256,uint256,bytes)
 
+    // Liquity V2 BorrowerOperations function selectors — keccak256(signature)[:4].
+    // These are the only actions this contract will ever credit for Liquity;
+    // anything else reverts. Unlike the other protocols, Liquity's
+    // TroveManager events don't carry the trove owner's address (a troveId
+    // is a hash of owner+ownerIndex) and are emitted by a *different*
+    // contract than the one users call — so Liquity is decoded from the
+    // verified transaction's own selector + sender, exactly like every
+    // other protocol here, rather than from event args. `adjustTrove` is
+    // intentionally left unmapped/revert-only: a single call can move both
+    // collateral and debt in either direction, so the selector alone can't
+    // tell us which EventType it was — the same class of ambiguity as
+    // Compound's asset-typed supply/withdraw, just not resolvable at all
+    // from calldata shape.
+    bytes4 constant SEL_LIQUITY_OPEN_TROVE = 0x9cb90ba6;       // openTrove(...)
+    bytes4 constant SEL_LIQUITY_ADD_COLL = 0x59f54f40;         // addColl(uint256,uint256)
+    bytes4 constant SEL_LIQUITY_WITHDRAW_COLL = 0x580de360;    // withdrawColl(uint256,uint256)
+    bytes4 constant SEL_LIQUITY_WITHDRAW_BOLD = 0x90de348a;    // withdrawBold(uint256,uint256,uint256)
+    bytes4 constant SEL_LIQUITY_REPAY_BOLD = 0x5cd067cf;       // repayBold(uint256,uint256)
+    bytes4 constant SEL_LIQUITY_CLOSE_TROVE = 0x5aa6d461;      // closeTrove(uint256)
+
     event LoanEventProven(
         address indexed wallet,
         uint256 chainKey,
@@ -208,11 +229,11 @@ contract CreditScoreMVP {
 
     /// @notice Set the pool address for a specific chain and protocol
     /// @param chainKey Chain identifier
-    /// @param protocolId Protocol identifier (0=Aave, 1=Compound, 2=Morpho)
+    /// @param protocolId Protocol identifier (0=Aave, 1=Compound, 2=Morpho, 3=Liquity)
     /// @param pool Pool address for this chain and protocol
     function setPoolAddress(uint64 chainKey, uint8 protocolId, address pool) external onlyOwner {
         require(pool != address(0), "Pool address cannot be zero");
-        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        require(protocolId <= uint8(ProtocolId.Liquity), "Invalid protocol ID");
         poolAddressByChainAndProtocol[chainKey][protocolId] = pool;
     }
 
@@ -222,7 +243,7 @@ contract CreditScoreMVP {
     /// @param gateway WETHGateway address for this chain and protocol
     function setWETHGatewayAddress(uint64 chainKey, uint8 protocolId, address gateway) external onlyOwner {
         require(gateway != address(0), "Gateway address cannot be zero");
-        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        require(protocolId <= uint8(ProtocolId.Liquity), "Invalid protocol ID");
         wethGatewayByChainAndProtocol[chainKey][protocolId] = gateway;
     }
 
@@ -264,6 +285,8 @@ contract CreditScoreMVP {
             return _decodeCompoundEventType(selector);
         } else if (protocolId == uint8(ProtocolId.Morpho)) {
             return _decodeMorphoEventType(selector);
+        } else if (protocolId == uint8(ProtocolId.Liquity)) {
+            return _decodeLiquityEventType(selector);
         } else {
             revert("invalid protocol ID");
         }
@@ -313,6 +336,22 @@ contract CreditScoreMVP {
         revert("unrecognized Morpho selector");
     }
 
+    /// @notice Decode Liquity event type from BorrowerOperations function
+    /// selector. `openTrove` and `addColl` both increase collateral, so both
+    /// count as Supply; `withdrawColl` and `closeTrove` (which returns all
+    /// remaining collateral) both count as Withdraw. `withdrawBold` mints
+    /// new debt (Borrow) and `repayBold` burns it (Repay). `adjustTrove` is
+    /// deliberately not mapped here — see the selector constants above.
+    function _decodeLiquityEventType(bytes4 selector) internal pure returns (EventType) {
+        if (selector == SEL_LIQUITY_OPEN_TROVE) return EventType.Supply;
+        if (selector == SEL_LIQUITY_ADD_COLL) return EventType.Supply;
+        if (selector == SEL_LIQUITY_WITHDRAW_COLL) return EventType.Withdraw;
+        if (selector == SEL_LIQUITY_WITHDRAW_BOLD) return EventType.Borrow;
+        if (selector == SEL_LIQUITY_REPAY_BOLD) return EventType.Repay;
+        if (selector == SEL_LIQUITY_CLOSE_TROVE) return EventType.Withdraw;
+        revert("unrecognized Liquity selector");
+    }
+
     function proveLoanEvent(
         address wallet,
         uint64 chainKey,
@@ -327,7 +366,7 @@ contract CreditScoreMVP {
         uint8 protocolId
     ) external {
         require(!provenTxHashes[txHashKey], "already proven");
-        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        require(protocolId <= uint8(ProtocolId.Liquity), "Invalid protocol ID");
 
         INativeQueryVerifier.MerkleProof memory merkleProof =
             INativeQueryVerifier.MerkleProof({root: merkleRoot, siblings: siblings});
@@ -383,7 +422,7 @@ contract CreditScoreMVP {
         );
         require(wallets.length > 0, "Empty batch");
         require(wallets.length <= 10, "Batch too large - max 10 events");
-        require(protocolId <= uint8(ProtocolId.Morpho), "Invalid protocol ID");
+        require(protocolId <= uint8(ProtocolId.Liquity), "Invalid protocol ID");
 
         // Check for already-proven transactions (cannot bypass deduplication)
         for (uint i = 0; i < txHashKeys.length; i++) {
@@ -459,11 +498,12 @@ contract CreditScoreMVP {
     }
 
     /// @notice Number of distinct protocols a wallet has used (popcount of a
-    /// 3-bit mask) — feeds the "credit mix" sub-score.
+    /// 4-bit mask) — feeds the "credit mix" sub-score.
     function _protocolDiversityCount(uint8 mask) internal pure returns (uint256 count) {
         if (mask & 0x1 != 0) count += 1;
         if (mask & 0x2 != 0) count += 1;
         if (mask & 0x4 != 0) count += 1;
+        if (mask & 0x8 != 0) count += 1;
     }
 
     /// @notice Normalized score in the 300-850 range (FICO/VantageScore
@@ -510,8 +550,8 @@ contract CreditScoreMVP {
             ? 100
             : (ageSeconds * 100) / AGE_MATURITY_SECONDS;
 
-        // 4. Protocol diversity / credit mix (10%): 0-3 protocols used.
-        uint256 diversityScore = (_protocolDiversityCount(s.protocolsUsedMask) * 100) / 3;
+        // 4. Protocol diversity / credit mix (10%): 0-4 protocols used.
+        uint256 diversityScore = (_protocolDiversityCount(s.protocolsUsedMask) * 100) / 4;
 
         // 5. Recency (10%): full marks if active within the last 90 days,
         // linearly decaying to 0 over the following 180 days.

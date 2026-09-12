@@ -138,6 +138,10 @@ node indexer/dist/index.js
 | `PRIVATE_KEY` | Prover wallet private key (0x-prefixed). Mark as Secret. |
 | `COMPOUND_SEPOLIA_COMET_USDC` | Compound V3 cUSDCv3 contract on Sepolia. |
 | `MORPHO_BLUE_SEPOLIA_ADDRESS` | Morpho Blue contract on Sepolia. |
+| `LIQUITY_SEPOLIA_BORROWER_OPERATIONS` | Liquity V2 (ETH branch) BorrowerOperations contract on Sepolia. |
+| `LIQUITY_SEPOLIA_TROVE_MANAGER` | Liquity V2 (ETH branch) TroveManager contract on Sepolia — used off-chain only, for discovering trove activity. |
+| `LIQUITY_SEPOLIA_COLL_TOKEN` | Liquity V2 ETH-branch collateral token on Sepolia. |
+| `LIQUITY_SEPOLIA_BOLD_TOKEN` | Liquity V2 BOLD stablecoin token on Sepolia. |
 | `AAVE_SEPOLIA_WETHGATEWAY` | Aave V3 WETHGateway on Sepolia. |
 | `PROOF_BUILDER_URL` | URL of the CC3 proof-builder service. |
 | `DATABASE_URL` | Same Neon pooled URL as the API. |

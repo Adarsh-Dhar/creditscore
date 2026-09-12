@@ -15,7 +15,7 @@
  */
 import { JsonRpcProvider, Contract, type Log } from "ethers";
 import { CHAINS, EVENT_NAME_MAP } from "./config.js";
-import { indexLiveLog } from "./index.js";
+import { indexLiveLog, indexLiveLiquityLog } from "./index.js";
 
 // Retry configuration for rate limiting
 const MAX_RETRIES = 3;
@@ -55,8 +55,12 @@ async function withRetry<T>(
   throw new Error(`Max retries exceeded for ${context}`);
 }
 
-export async function startWatchers(): Promise<Contract[]> {
-  const contracts: Contract[] = [];
+export interface WatcherHandle {
+  removeAll: () => Promise<void> | void;
+}
+
+export async function startWatchers(): Promise<WatcherHandle[]> {
+  const handles: WatcherHandle[] = [];
 
   for (const chainConfig of CHAINS) {
     const { name: chain, rpcEnvVar, protocols } = chainConfig;
@@ -97,10 +101,42 @@ export async function startWatchers(): Promise<Contract[]> {
         continue;
       }
 
+      if (protocol === "liquity") {
+        const { eventEmitterAddress } = protocolConfig;
+        if (!eventEmitterAddress || eventEmitterAddress === "0x0000000000000000000000000000000000000000") {
+          console.log(`[watch] Skipping liquity on ${chain}: eventEmitterAddress (TroveManager) not configured`);
+          continue;
+        }
+
+        // No usable event ABI for Liquity (see config.ts) — listen for any
+        // raw log from TroveManager as a "something happened" signal, then
+        // decode the underlying transaction directly in indexLiveLiquityLog.
+        const filter = { address: eventEmitterAddress };
+        const listener = (log: Log) => {
+          withRetry(
+            () => indexLiveLiquityLog(log, provider, chain, protocolConfig),
+            `liquity:TroveManager`
+          ).catch((err: any) => {
+            const message = err?.message || String(err);
+            if (isRateLimitError(err)) {
+              console.warn(`[watch] Rate limit hit on liquity, skipping this event`);
+            } else if (isFilterError(err)) {
+              // Silently ignore filter errors - ethers.js auto-recovers
+            } else {
+              console.error(`[watch] indexLiveLiquityLog error: ${message}`);
+            }
+          });
+        };
+        provider.on(filter, listener);
+        handles.push({ removeAll: () => { void provider.off(filter, listener); } });
+        console.log(`[watch]   → Listening for raw logs on TroveManager (${eventEmitterAddress})`);
+        continue;
+      }
+
       console.log(`[watch] Setting up listeners for ${protocol} (${contractAddress})`);
 
       const poolContract = new Contract(contractAddress, abi, provider);
-      contracts.push(poolContract);
+      handles.push({ removeAll: () => { void poolContract.removeAllListeners(); } });
 
       const protocolEventNames = Object.keys(EVENT_NAME_MAP[protocol] || {});
       const poolEventNames = protocolEventNames.filter((name) => !name.includes("ETH"));
@@ -132,7 +168,7 @@ export async function startWatchers(): Promise<Contract[]> {
         wethGatewayAbi
       ) {
         const gatewayContract = new Contract(wethGatewayAddress, wethGatewayAbi, provider);
-        contracts.push(gatewayContract);
+        handles.push({ removeAll: () => { void gatewayContract.removeAllListeners(); } });
 
         const gatewayEventNames = protocolEventNames.filter((name) => name.includes("ETH"));
 
@@ -159,9 +195,9 @@ export async function startWatchers(): Promise<Contract[]> {
     }
   }
 
-  return contracts;
+  return handles;
 }
 
-export async function stopWatchers(contracts: Contract[]): Promise<void> {
-  await Promise.all(contracts.map((c) => c.removeAllListeners()));
+export async function stopWatchers(handles: WatcherHandle[]): Promise<void> {
+  await Promise.all(handles.map((h) => h.removeAll()));
 }

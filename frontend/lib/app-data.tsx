@@ -106,6 +106,7 @@ const protocolColors: Record<string, string> = {
   aave: 'mint',
   compound: 'gold',
   morpho: 'blue',
+  liquity: 'peach',
 }
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
