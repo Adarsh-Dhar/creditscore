@@ -30,12 +30,9 @@
  *   LIQUITY_TROVE_ID                     (required for every op except `open`)
  *
  * NOTE on `open`: openTrove's full parameter list is the most involved
- * function in BorrowerOperations and this script's ABI for it is
- * best-effort (see indexer/src/liquityDecoder.ts's OPEN_TROVE_BEST_EFFORT_ABI
- * for the same caveat). If it reverts with a decoding-shaped error rather
- * than a business-logic one (e.g. "MCR breached"), check the currently
- * deployed BorrowerOperations ABI on Etherscan and adjust the signature
- * below before re-running.
+ * function in BorrowerOperations. The ABI below is verified against the
+ * official Liquity V2 (BOLD) repository at:
+ * https://github.com/liquity/bold/blob/a34960222df5061fa7c0213df5d20626adf3ecc4/contracts/src/BorrowerOperations.sol
  */
 
 require("dotenv").config();

@@ -137,9 +137,9 @@ const DEBT_TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
 ];
 
-// Liquity V2 BorrowerOperations (ETH branch). openTrove's ABI here is
-// best-effort — see scripts/lib/liquity.cjs's header comment for the same
-// caveat; it's only exercised by step 12 below.
+// Liquity V2 BorrowerOperations (ETH branch). The ABI below is verified
+// against the official Liquity V2 (BOLD) repository at:
+// https://github.com/liquity/bold/blob/a34960222df5061fa7c0213df5d20626adf3ecc4/contracts/src/BorrowerOperations.sol
 const LIQUITY_BORROWER_OPS_ABI = [
   "function openTrove(address _owner, uint256 _ownerIndex, uint256 _collAmount, uint256 _boldAmount, uint256 _upperHint, uint256 _lowerHint, uint256 _annualInterestRate, uint256 _maxUpfrontFee, address _addManager, address _removeManager, address _receiver) external returns (uint256)",
   "function addColl(uint256 _troveId, uint256 _collAmount) external",

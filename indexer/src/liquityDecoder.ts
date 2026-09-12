@@ -36,8 +36,10 @@ export const LIQUITY_SELECTORS: Record<string, string> = {
 // Only the functions with a simple, confidently-known parameter list get
 // full calldata decoding for the `amount` field. openTrove's full parameter
 // list is more involved and decoding it wrong would silently produce a
-// bogus amount, so it's decoded best-effort in a try/catch below and falls
-// back to `null` rather than guessing.
+// bogus amount, so it's decoded in a try/catch below and falls
+// back to `null` rather than guessing. The ABI is verified against the
+// official Liquity V2 (BOLD) repository at:
+// https://github.com/liquity/bold/blob/a34960222df5061fa7c0213df5d20626adf3ecc4/contracts/src/BorrowerOperations.sol
 const LIQUITY_FUNCTION_ABIS: Record<string, string> = {
   "0x59f54f40": "function addColl(uint256 _troveId, uint256 _collAmount)",
   "0x580de360": "function withdrawColl(uint256 _troveId, uint256 _collWithdrawal)",
@@ -45,11 +47,10 @@ const LIQUITY_FUNCTION_ABIS: Record<string, string> = {
   "0x5cd067cf": "function repayBold(uint256 _troveId, uint256 _boldAmount)",
 };
 
-// Best-effort only — see note above. If the real deployed signature
-// differs from this guess, decoding throws and we fall back to null rather
-// than crediting a wrong amount.
+// ABI verified against official Liquity V2 (BOLD) repository. If decoding
+// fails, we fall back to null rather than crediting a wrong amount.
 const OPEN_TROVE_BEST_EFFORT_ABI =
-  "function openTrove(address _owner, uint256 _ownerIndex, uint256 _collAmount, uint256 _boldAmount, uint256 _upperHint, uint256 _lowerHint, uint256 _annualInterestRate, uint256 _maxUpfrontFee, address _addManager, address _removeManager, address _receiver)";
+  "function openTrove(address _owner, uint256 _ownerIndex, uint256 _collAmount, uint256 _boldAmount, uint256 _upperHint, uint256 _lowerHint, uint256 _annualInterestRate, uint256 _maxUpfrontFee, address _addManager, address _removeManager, address _receiver) external returns (uint256)";
 
 export function decodeLiquitySelector(data: string | null | undefined): string | null {
   if (!data || data.length < 10) return null;
