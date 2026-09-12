@@ -57,21 +57,58 @@ async function main() {
   }
 
   // Compound Comet (USDC market) on Sepolia
-  const COMET_ADDRESS = COMPOUND_SEPOLIA_COMET_USDC;
+  const COMET_ADDRESS = COMPOUND_SEPOLIA_COMET_USDC || "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e";
 
   // Base asset for this Comet market (USDC) — supplying this = "Repay" per app classification
   const BASE_ASSET_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 
-  // A collateral asset accepted by this Comet market — supplying this = "Supply"
-  // WETH on Sepolia (commonly used as Comet collateral)
-  const COLLATERAL_WETH = "0xfff9976782d46cc05630d34fae175e5c0be1995d";
-
   // Toggle: supply base asset (Repay) vs. collateral asset (Supply)
   const USE_BASE_ASSET = (process.env.USE_BASE_ASSET || "true").toLowerCase() === "true";
 
-  const ASSET = USE_BASE_ASSET ? BASE_ASSET_USDC : COLLATERAL_WETH;
-  const ASSET_LABEL = USE_BASE_ASSET ? "USDC (base asset -> Repay)" : "WETH (collateral -> Supply)";
-  const ASSET_DECIMALS = USE_BASE_ASSET ? 6 : 18;
+  const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
+  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+
+  // NOTE: which assets a given Comet deployment accepts as collateral is
+  // deployment-specific and not guaranteed to match mainnet conventions
+  // (e.g. WETH is not guaranteed to be configured on every Sepolia market).
+  // Query the Comet contract directly instead of hardcoding a guess.
+  let ASSET, ASSET_LABEL, ASSET_DECIMALS;
+  if (USE_BASE_ASSET) {
+    ASSET = BASE_ASSET_USDC;
+    ASSET_LABEL = "USDC (base asset -> Repay)";
+    ASSET_DECIMALS = 6;
+  } else {
+    const cometRead = new ethers.Contract(
+      COMET_ADDRESS,
+      [
+        "function numAssets() view returns (uint8)",
+        "function getAssetInfo(uint8) view returns (tuple(uint8 offset, address asset, address priceFeed, uint64 scale, uint64 borrowCollateralFactor, uint64 liquidateCollateralFactor, uint64 liquidationFactor, uint128 supplyCap))",
+      ],
+      provider
+    );
+    const KNOWN_WETH = "0xfff9976782d46cc05630d34fae175e5c0be1995d";
+    const numAssets = await cometRead.numAssets();
+    const collaterals = [];
+    for (let i = 0; i < numAssets; i++) {
+      const info = await cometRead.getAssetInfo(i);
+      collaterals.push(info.asset);
+    }
+    console.log(`  Comet-configured collateral assets: ${collaterals.join(", ") || "(none)"}`);
+    const weth = collaterals.find((a) => a.toLowerCase() === KNOWN_WETH.toLowerCase());
+    if (weth) {
+      ASSET = weth;
+      ASSET_LABEL = "WETH (collateral -> Supply)";
+      ASSET_DECIMALS = 18;
+    } else if (collaterals.length > 0) {
+      ASSET = collaterals[0];
+      ASSET_LABEL = `collateral asset ${ASSET} (WETH not configured on this market -> using first available)`;
+      ASSET_DECIMALS = 18; // adjust if the chosen asset isn't 18-decimal
+      console.log(`  ⚠️  WETH is not a configured collateral on this Comet — falling back to ${ASSET}`);
+    } else {
+      console.error("❌ This Comet market has no configured collateral assets.");
+      process.exit(1);
+    }
+  }
 
   // Amount (will be adjusted based on available balance)
   let AMOUNT = USE_BASE_ASSET
@@ -82,9 +119,6 @@ async function main() {
   console.log(`  Comet market: ${COMET_ADDRESS}`);
   console.log(`  Asset: ${ASSET_LABEL} (${ASSET})`);
   console.log(`  Target Amount: ${ethers.formatUnits(AMOUNT, ASSET_DECIMALS)} (will adjust based on balance)`);
-
-  const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
   console.log(`  From wallet: ${wallet.address}`);
   if (TARGET_WALLET) {

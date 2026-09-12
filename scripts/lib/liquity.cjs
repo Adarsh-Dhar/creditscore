@@ -108,31 +108,57 @@ async function main() {
 
     switch (operation) {
       case "open": {
+        // NOTE: Liquity V2 enforces a hard MIN_DEBT floor of 2000 BOLD per Trove
+        // (entireDebt = boldAmount + upfront fee must clear it) — requesting less
+        // reverts with the custom error DebtBelowMin() (selector 0xf1e41913).
+        // 2200 leaves headroom above the floor for the upfront fee.
         const collAmount = process.argv[3] || "2000000000000000000"; // 2 collateral tokens, 18 dec
-        const boldAmount = process.argv[4] || "1800000000000000000000"; // 1800 BOLD, 18 dec
+        const boldAmount = process.argv[4] || "2200000000000000000000"; // 2200 BOLD, 18 dec (MIN_DEBT is 2000)
 
-        console.log(`\nStep 1: Approving BorrowerOperations to spend collateral token...`);
-        const token = new ethers.Contract(COLL_TOKEN, ERC20_ABI, provider);
-        const balance = await token.balanceOf(wallet.address);
+        console.log(`\nStep 1: Getting WETHTester collateral...`);
+        const collToken = new ethers.Contract(
+          COLL_TOKEN,
+          ["function deposit() payable", "function tap()", "function balanceOf(address) view returns (uint256)"],
+          wallet
+        );
+        
+        const balance = await collToken.balanceOf(wallet.address);
+        console.log(`  WETHTester balance: ${ethers.formatEther(balance)}`);
+        
         if (balance < BigInt(collAmount)) {
-          console.error(
-            `❌ Insufficient collateral token balance (have ${balance}, need ${collAmount}). Get some from a Liquity Sepolia faucet first.`
-          );
-          process.exit(1);
+          console.log(`  Insufficient balance, depositing ETH to get WETHTester...`);
+          const depositAmount = ethers.parseEther("0.05");
+          const depositTx = await collToken.deposit({ value: depositAmount });
+          console.log(`  Deposit tx: ${depositTx.hash}`);
+          await depositTx.wait();
+          console.log("  ✅ Deposit confirmed");
+          
+          const newBalance = await collToken.balanceOf(wallet.address);
+          console.log(`  New WETHTester balance: ${ethers.formatEther(newBalance)}`);
         }
-        const currentAllowance = await token.allowance(wallet.address, BORROWER_OPERATIONS);
-        if (currentAllowance < BigInt(collAmount)) {
-          const approveTx = await token.connect(wallet).approve(BORROWER_OPERATIONS, collAmount);
+
+        console.log(`\nStep 2: Approving BorrowerOperations to spend WETHTester...`);
+        const erc20Token = new ethers.Contract(COLL_TOKEN, ERC20_ABI, wallet);
+        const currentAllowance = await erc20Token.allowance(wallet.address, BORROWER_OPERATIONS);
+        // openTrove requires collAmount + gasCompensation (0.0375 WETHTester)
+        const gasCompensation = ethers.parseUnits("0.0375", 18);
+        const totalRequired = BigInt(collAmount) + gasCompensation;
+        if (currentAllowance < totalRequired) {
+          const approveTx = await erc20Token.approve(BORROWER_OPERATIONS, ethers.MaxUint256);
           console.log(`  Approval transaction: ${approveTx.hash}`);
           await approveTx.wait();
           console.log("  ✅ Approval confirmed");
         }
 
-        console.log(`\nStep 2: Opening trove (coll=${collAmount}, bold=${boldAmount})...`);
-        // ownerIndex 0 (first trove for this owner), no hint optimization
-        // (0/0 — accepted, just costs a bit more gas), 5% annual interest
-        // rate, no upfront-fee cap, no add/remove manager delegation,
-        // receiver = self.
+        console.log(`\nStep 3: Opening trove (coll=${ethers.formatEther(collAmount)} WETHTester, bold=${ethers.formatEther(boldAmount)} BOLD)...`);
+        // ownerIndex 0 (first trove for this owner), no hint optimization,
+        // 5% annual interest rate, no upfront-fee cap, no add/remove manager
+        // delegation. IMPORTANT: BorrowerOperations' internal check
+        // (_requireNonZeroManagerUnlessWiping in AddRemoveManagers.sol)
+        // reverts with EmptyManager() (selector 0x22359217) if _removeManager
+        // is the zero address but _receiver is NOT — they must both be zero
+        // together, or both be set. Passing wallet.address as receiver while
+        // leaving removeManager at ZeroAddress trips exactly that check.
         tx = await borrowerOps.openTrove(
           wallet.address,
           0,
@@ -144,19 +170,19 @@ async function main() {
           ethers.MaxUint256, // no cap on upfront fee
           ethers.ZeroAddress,
           ethers.ZeroAddress,
-          wallet.address
+          ethers.ZeroAddress // must match removeManager (zero/zero) — see note above
         );
         break;
       }
 
       case "add-coll": {
         const troveId = resolveTroveId(4);
-        const collAmount = process.argv[3] || "500000000000000000"; // 0.5 collateral token
-        console.log(`\nApproving and adding ${collAmount} collateral to trove ${troveId}...`);
-        const token = new ethers.Contract(COLL_TOKEN, ERC20_ABI, provider);
+        const collAmount = process.argv[3] || "500000000000000000"; // 0.5 WETHTester
+        console.log(`\nApproving and adding ${ethers.formatEther(collAmount)} WETHTester collateral to trove ${troveId}...`);
+        const token = new ethers.Contract(COLL_TOKEN, ERC20_ABI, wallet);
         const currentAllowance = await token.allowance(wallet.address, BORROWER_OPERATIONS);
         if (currentAllowance < BigInt(collAmount)) {
-          const approveTx = await token.connect(wallet).approve(BORROWER_OPERATIONS, collAmount);
+          const approveTx = await token.approve(BORROWER_OPERATIONS, collAmount);
           console.log(`  Approval transaction: ${approveTx.hash}`);
           await approveTx.wait();
         }
@@ -166,8 +192,8 @@ async function main() {
 
       case "withdraw-coll": {
         const troveId = resolveTroveId(4);
-        const collAmount = process.argv[3] || "200000000000000000"; // 0.2 collateral token
-        console.log(`\nWithdrawing ${collAmount} collateral from trove ${troveId}...`);
+        const collAmount = process.argv[3] || "200000000000000000"; // 0.2 WETHTester
+        console.log(`\nWithdrawing ${ethers.formatEther(collAmount)} WETHTester collateral from trove ${troveId}...`);
         tx = await borrowerOps.withdrawColl(troveId, collAmount);
         break;
       }

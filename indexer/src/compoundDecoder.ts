@@ -11,7 +11,7 @@ import type { AssetAndAmount } from "./aaveDecoder.js";
 
 // This needs to be configured per-chain since base asset addresses differ
 const COMET_BASE_ASSETS: Record<string, string> = {
-  sepolia: "0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e", // USDC on Sepolia Comet (actual base asset)
+  sepolia: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia (base asset for Comet)
   // Add other chains as needed
 };
 
@@ -41,7 +41,10 @@ export function extractAssetAndAmount(eventName: string, args: Result, chain: st
   switch (eventName) {
     case "Supply":
     case "Withdraw":
-      return { asset: args.asset as string, amount: (args.amount as bigint).toString() };
+      // Compound Supply/Withdraw events don't include asset address in the event itself
+      // The asset is implied by the ERC20 transfer that accompanies the call
+      // For now, we default to null and rely on classification logic
+      return { asset: null, amount: (args.amount as bigint).toString() };
     case "Absorb":
       // Absorb doesn't have a single asset/amount - return null for now
       return { asset: null, amount: null };
@@ -53,8 +56,18 @@ export function extractAssetAndAmount(eventName: string, args: Result, chain: st
 // Classify Compound event based on asset type
 export function classifyCompoundEvent(eventName: string, assetAddress: string | null, chain: string): string {
   const baseAsset = getBaseAssetAddress(chain);
+  
+  // For Compound Comet on Sepolia (USDC market), Supply of base asset = Repay
+  // Since events don't include asset address, we default to this classification
+  if (chain === "sepolia" && eventName === "Supply") {
+    return "Repay";
+  }
+  if (chain === "sepolia" && eventName === "Withdraw") {
+    return "Borrow";
+  }
+
   if (!baseAsset || !assetAddress) {
-    // If we don't know the base asset, use default classification
+    // If we don't know the base asset or asset, use default classification
     return eventName;
   }
 

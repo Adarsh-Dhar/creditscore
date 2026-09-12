@@ -308,6 +308,17 @@ async function main() {
       const actualDebt = ethers.formatUnits(actualDebtRaw, repayDecimals);
       console.log(`  Actual USDC debt: ${actualDebt} USDC`);
 
+      // NOTE: totalDebtBase above is wallet-wide across all reserves, but
+      // repay() is asset+rateMode specific. If this wallet's USDC variable
+      // debt is already zero (e.g. a prior repay in this test run already
+      // cleared it), submitting repay() here reverts on-chain with Aave's
+      // custom error code '39' (NO_DEBT_OF_SELECTED_TYPE) instead of failing
+      // cleanly beforehand. Guard against that explicitly.
+      if (actualDebtRaw === 0n) {
+        console.log("✅ No USDC variable debt remaining for this wallet — already fully repaid.");
+        process.exit(0);
+      }
+
       // Default to 1 USDC if no amount specified
       let repayAmount = AMOUNT;
       if (!customAmount) {

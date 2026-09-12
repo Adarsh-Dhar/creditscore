@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "compile": "hardhat compile",
-    "deploy": "hardhat run scripts/deploy.js --network cc3Testnet",
+    "deploy": "hardhat run scripts/deploy.cjs --network cc3Testnet",
     "prove": "node scripts/generateAndSubmitProof.cjs",
     "prove-queue": "node scripts/proveQueue.cjs",
     "check-score": "node scripts/checkScore.cjs",
