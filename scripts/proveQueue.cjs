@@ -123,9 +123,11 @@ async function main() {
         continue;
       }
 
-      // When batch size is 1, go straight to individual proofs — skip the batch
-      // API endpoint entirely rather than calling it and falling back on every event.
-      const useBatchPath = BATCH_SIZE > 1 && validEvents.length > 1;
+      // Always use the batch path — getBatchProof correctly embeds the tx index
+      // in the proof bundle, while getProof (used by the individual path) returns
+      // a wrong bundle index for transactions that are not the first in their block.
+      // proveLoanEventsBatch works correctly for a single event too.
+      const useBatchPath = BATCH_SIZE > 0;
 
       // Process batch for this chain:protocol
       let batchResult;

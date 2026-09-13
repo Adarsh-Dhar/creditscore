@@ -43,14 +43,15 @@
     "run-all-tx:compound": "node scripts/runAllTx.cjs compound",
     "run-all-tx:liquity": "node scripts/runAllTx.cjs liquity",
     "db:migrate": "node scripts/migrate.mjs"
-
   },
   "dependencies": {
     "@gluwa/usc-contracts": "^0.1.2",
     "@gluwa/usc-sdk": "^0.18.0",
     "@prisma/orm-postgres": "8.0.0-rc.8",
+    "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "ethers": "^6.13.0",
+    "express": "^4.21.2",
     "pg": "^8.23.0"
   },
   "devDependencies": {

@@ -1,0 +1,10 @@
+{
+  "name": "creditscore-tx-server",
+  "version": "1.0.0",
+  "description": "Transaction execution server for creditscore DeFi protocols",
+  "type": "commonjs",
+  "scripts": {
+    "server": "node index.cjs",
+    "start": "node index.cjs"
+  }
+}

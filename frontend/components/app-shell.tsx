@@ -140,10 +140,10 @@ function ShellInner({ children }: { children: ReactNode }) {
         </header>
 
         <div className="dashboard-content">
-          {errors.weights && errors.weights.includes('API') && (
+          {errors.chains && errors.chains.includes('API') && (
             <div className="error-banner">
               <AlertCircle size={16} />
-              <span>{errors.weights}</span>
+              <span>{errors.chains}</span>
               <button className="text-button" onClick={() => window.open('https://creditscore-rzua.onrender.com/api/health', '_blank')}>
                 Check API status
               </button>

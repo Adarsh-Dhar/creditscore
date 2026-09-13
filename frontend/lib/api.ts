@@ -32,7 +32,6 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     if (error instanceof ApiError) {
       throw error;
     }
-    // Handle network errors or fetch failures (CORS block, server unreachable, DNS failure)
     if (error instanceof TypeError) {
       const isLocal = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
       const hint = isLocal
@@ -159,4 +158,46 @@ export async function registerWallet(address: string): Promise<RegisterWalletRes
   return fetchAPI<RegisterWalletResponse>(`/api/wallets/${address}/register`, {
     method: 'POST',
   });
+}
+
+// ── Transaction server ────────────────────────────────────────────────────────
+
+const TX_SERVER_URL = process.env.NEXT_PUBLIC_TX_SERVER_URL || 'http://localhost:3002';
+
+export interface TxResult {
+  ok: boolean;
+  txHash?: string;
+  blockNumber?: number;
+  operation?: string;
+  asset?: string;
+  amount?: string;
+  creditEvent?: string;
+  troveId?: string;
+  error?: string;
+}
+
+/**
+ * Execute a DeFi transaction via the local tx-server.
+ *
+ * @param protocol   "aave" | "compound" | "liquity"
+ * @param operation  e.g. "supply", "borrow", "open", "add-coll" …
+ * @param params     Optional body params (amount, troveId, …)
+ */
+export async function executeTx(
+  protocol: string,
+  operation: string,
+  params: Record<string, string> = {}
+): Promise<TxResult> {
+  const url = `${TX_SERVER_URL}/${protocol}/${operation}`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data: TxResult = await response.json();
+    return data;
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Network error — is the tx-server running?' };
+  }
 }

@@ -103,8 +103,8 @@ const eventColors: Record<string, string> = {
 }
 
 const protocolColors: Record<string, string> = {
-  aave: 'mint',
-  compound: 'gold',
+  aave: 'peach',
+  compound: 'peach',
   morpho: 'blue',
   liquity: 'peach',
 }

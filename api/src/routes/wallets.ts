@@ -216,4 +216,186 @@ router.post("/:address/register", async (req: Request, res: Response, next: Next
   }
 });
 
+// GET /api/wallets/:address/score-history - score at regular intervals,
+// oldest first, for charting. Returns both event-driven changes and
+// interpolated drift points so the graph reflects continuous utilization decay.
+router.get("/:address/score-history", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { address } = req.params;
+
+    if (!ethers.isAddress(address)) {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
+    const checksummedAddress = ethers.getAddress(address);
+
+    const [rows, walletRow] = await Promise.all([
+      (db.orm.public.AiScoreLog.where((l: any) =>
+        l.wallet.ilike(checksummedAddress)
+      ).orderBy((l: any) => l.createdAt.asc()) as any).all(),
+      db.orm.public.RegisteredWallet.where((w: any) =>
+        w.wallet.ilike(checksummedAddress)
+      ).first(),
+    ]);
+
+    if (rows.length === 0) {
+      return res.json({ wallet: checksummedAddress, points: [] });
+    }
+
+    // Build a timeline of (timestamp, rawScore, uDrift, netOutstandingUSD)
+    // snapshots, one per logged event. Between events and up to now, we
+    // interpolate at regular intervals so the graph shows the continuous
+    // utilization drift rather than a stale flat line.
+
+    // Snapshot after each logged event
+    type Snapshot = {
+      ts: number;           // unix seconds
+      rawScore: number;
+      uDrift: number;
+      netOutstandingUSD: number;
+      eventName: string;
+      rawDelta: number;
+      reasoning: string;
+    };
+
+    const snapshots: Snapshot[] = rows.map((r: any) => ({
+      ts: Math.floor(new Date(r.createdAt).getTime() / 1000),
+      rawScore: r.newRawScore,
+      uDrift: r.uDrift ?? 0,         // stored uDrift at event time if present
+      netOutstandingUSD: r.netOutstandingUSD ?? 0,
+      eventName: r.eventName,
+      rawDelta: r.rawDelta,
+      reasoning: r.reasoning,
+    }));
+
+    // For snapshots that don't have uDrift/netOutstandingUSD stored (older
+    // rows before those columns were added to AiScoreLog), we can only show
+    // the recorded newDisplayScore — fall back to reading it directly.
+    const hasUDriftInLog = rows[0]?.uDrift !== undefined && rows[0]?.uDrift !== null;
+
+    if (!hasUDriftInLog) {
+      // Old schema — just return the rounded log values + a live "Now" point
+      const points = rows.map((r: any) => ({
+        timestamp: r.createdAt,
+        score: Math.round(r.newDisplayScore),
+        eventName: r.eventName,
+        delta: r.rawDelta,
+        reasoning: r.reasoning,
+      }));
+
+      const liveScore = walletRow
+        ? (() => {
+            const rawScore = (walletRow as any).rawScore ?? 0;
+            const uDrift = (walletRow as any).uDrift ?? 0;
+            const lastCheckpointAt = (walletRow as any).lastCheckpointAt || Math.floor(Date.now() / 1000);
+            const netOutstandingUSD = (walletRow as any).netOutstandingUSD ?? 0;
+            const now = Math.floor(Date.now() / 1000);
+            const liveUDrift = computeUtilizationDrift(uDrift, netOutstandingUSD, lastCheckpointAt, now);
+            return Math.round(computeFicoScore(rawScore, liveUDrift));
+          })()
+        : null;
+
+      const lastScore = points[points.length - 1].score;
+      if (liveScore !== null && liveScore !== lastScore) {
+        points.push({
+          timestamp: new Date().toISOString(),
+          score: liveScore,
+          eventName: "Now",
+          delta: liveScore - lastScore,
+          reasoning: "Live score (utilization drift applied)",
+        });
+      }
+
+      return res.json({ wallet: checksummedAddress, points });
+    }
+
+    // New schema — interpolate continuous drift between events
+    const points: Array<{
+      timestamp: string;
+      score: number;
+      eventName: string;
+      delta: number;
+      reasoning: string;
+    }> = [];
+
+    // Emit a score point at an arbitrary (rawScore, uDrift, netOutstandingUSD)
+    // state — settling uDrift from `checkpointTs` up to `toTs` first.
+    function emitPoint(
+      rawScore: number,
+      uDrift: number,
+      netOutstandingUSD: number,
+      checkpointTs: number,
+      toTs: number,
+      eventName: string,
+      delta: number,
+      reasoning: string,
+    ) {
+      const settledUDrift = computeUtilizationDrift(uDrift, netOutstandingUSD, checkpointTs, toTs);
+      const score = Math.round(computeFicoScore(rawScore, settledUDrift));
+      points.push({
+        timestamp: new Date(toTs * 1000).toISOString(),
+        score,
+        eventName,
+        delta,
+        reasoning,
+      });
+    }
+
+    // Emit each event point
+    for (const snap of snapshots) {
+      emitPoint(
+        snap.rawScore,
+        snap.uDrift,
+        snap.netOutstandingUSD,
+        snap.ts,  // already settled to this ts at write time
+        snap.ts,
+        snap.eventName,
+        snap.rawDelta,
+        snap.reasoning,
+      );
+    }
+
+    // Now interpolate from last event up to now using live wallet state
+    if (walletRow) {
+      const lastSnap = snapshots[snapshots.length - 1];
+      const rawScore = (walletRow as any).rawScore ?? lastSnap.rawScore;
+      const uDrift = (walletRow as any).uDrift ?? lastSnap.uDrift;
+      const netOutstandingUSD = (walletRow as any).netOutstandingUSD ?? lastSnap.netOutstandingUSD;
+      const lastCheckpointAt = (walletRow as any).lastCheckpointAt || lastSnap.ts;
+      const nowTs = Math.floor(Date.now() / 1000);
+      const spanSeconds = nowTs - lastCheckpointAt;
+
+      // Only interpolate if there's meaningful time elapsed (> 1 hour)
+      // and the wallet has outstanding debt (so drift is actually moving).
+      const INTERPOLATE_MIN_SPAN = 3600; // 1 hour
+      if (spanSeconds > INTERPOLATE_MIN_SPAN && netOutstandingUSD > 0) {
+        // Emit ~6 intermediate points spread across the gap (max 1 per hour)
+        const numSteps = Math.min(6, Math.floor(spanSeconds / INTERPOLATE_MIN_SPAN));
+        const stepSize = Math.floor(spanSeconds / (numSteps + 1));
+        for (let i = 1; i <= numSteps; i++) {
+          const stepTs = lastCheckpointAt + stepSize * i;
+          emitPoint(rawScore, uDrift, netOutstandingUSD, lastCheckpointAt, stepTs, "Drift", 0, "Utilization drift (no new events)");
+        }
+      }
+
+      // Always emit the live "Now" point
+      const liveUDrift = computeUtilizationDrift(uDrift, netOutstandingUSD, lastCheckpointAt, nowTs);
+      const liveScore = Math.round(computeFicoScore(rawScore, liveUDrift));
+      const lastEmittedScore = points[points.length - 1].score;
+      if (liveScore !== lastEmittedScore) {
+        points.push({
+          timestamp: new Date().toISOString(),
+          score: liveScore,
+          eventName: "Now",
+          delta: liveScore - lastEmittedScore,
+          reasoning: "Live score (utilization drift applied)",
+        });
+      }
+    }
+
+    res.json({ wallet: checksummedAddress, points });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

@@ -33,6 +33,14 @@ jobs:
       COMPOUND_SEPOLIA_COMET_USDC: ${{ secrets.COMPOUND_SEPOLIA_COMET_USDC }}
       MORPHO_BLUE_SEPOLIA_ADDRESS: ${{ secrets.MORPHO_BLUE_SEPOLIA_ADDRESS }}
       AAVE_SEPOLIA_WETHGATEWAY: ${{ secrets.AAVE_SEPOLIA_WETHGATEWAY }}
+      # Liquity V2 (ETH branch) addresses — required by the indexer to scan
+      # TroveManager logs and by proveQueue to validate tx.to before proving.
+      # Falls back to the hardcoded defaults in indexer/src/config.ts if unset,
+      # but setting them here keeps everything explicit and survives redeployments.
+      LIQUITY_SEPOLIA_BORROWER_OPERATIONS: ${{ secrets.LIQUITY_SEPOLIA_BORROWER_OPERATIONS }}
+      LIQUITY_SEPOLIA_TROVE_MANAGER: ${{ secrets.LIQUITY_SEPOLIA_TROVE_MANAGER }}
+      LIQUITY_SEPOLIA_COLL_TOKEN: ${{ secrets.LIQUITY_SEPOLIA_COLL_TOKEN }}
+      LIQUITY_SEPOLIA_BOLD_TOKEN: ${{ secrets.LIQUITY_SEPOLIA_BOLD_TOKEN }}
 
     steps:
       - name: Checkout repo

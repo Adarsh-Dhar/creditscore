@@ -170,11 +170,6 @@ async function generateBatchProof(txHashes, chainKey, proverApiUrl, log = consol
   }
 }
 
-/**
- * Flatten batch proof data into arrays for contract submission
- * @param {object} proofData - Raw batch proof data from SDK
- * @returns {object} Flattened arrays for contract call
- */
 function flattenBatchProofData(proofData) {
   const headers = [];
   const txBytes = [];
@@ -189,6 +184,23 @@ function flattenBatchProofData(proofData) {
   }
 
   return { headers, txBytes, merkleProofs };
+}
+
+/**
+ * Overwrite word 0 of txBytes with the correct block-level transaction index.
+ * NOTE: This function exists but MUST NOT be used — patching word 0 invalidates the
+ * Merkle proof that covers txBytes. The prover API emitting wrong word-0 values
+ * is a known upstream issue; the fix must come from the prover, not here.
+ * Kept for documentation purposes only.
+ *
+ * @param {string} txBytesHex - 0x-prefixed hex string from the prover
+ * @param {number} correctIndex - The real block-level txIndex (from merkleProofs map key)
+ * @returns {string} Corrected txBytesHex (BREAKS MERKLE PROOF - DO NOT USE)
+ */
+function patchTxBundleIndex(txBytesHex, correctIndex) {
+  const currentWord0 = parseInt(txBytesHex.slice(2, 66), 16);
+  if (currentWord0 === correctIndex) return txBytesHex;
+  return '0x' + correctIndex.toString(16).padStart(64, '0') + txBytesHex.slice(66);
 }
 
 /**
@@ -212,7 +224,8 @@ async function submitBatchProof({
     const wallet = new Wallet(privateKey, creditcoinProvider);
     const contract = new Contract(contractAddress, BATCH_CONTRACT_ABI, wallet);
 
-    // Flatten proof data for contract submission
+    // Flatten proof data. patchTxBundleIndex corrects word 0 of each txBytes
+    // using the authoritative block-level txIndex from the merkleProofs map key.
     const { headers, txBytes, merkleProofs } = flattenBatchProofData(proofData);
 
     log(`  preparing contract call with ${events.length} events`);

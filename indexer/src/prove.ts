@@ -41,9 +41,12 @@ const RPC_BY_CHAIN: Record<string, string | undefined> = {
 const { CC3_TESTNET_RPC, PROVER_API_URL, PRIVATE_KEY, CONTRACT_ADDRESS } = process.env;
 const PROVER_URL = PROVER_API_URL || "https://prover.cc3-testnet.creditcoin.network";
 
-// "immediate": prove each event as it lands (lowest latency, matches "real time").
-// "batch": group same chain:protocol events (up to PROVE_BATCH_SIZE) into one
-//   on-chain tx via getBatchProof — cheaper gas, slightly higher latency.
+// "batch": Always use getBatchProof + proveLoanEventsBatch. This is the only
+//   correct path — getProof (used by the "immediate" path) embeds a wrong tx
+//   bundle index in txBytes for transactions not at position 0 in their block,
+//   causing the on-chain EvmV1Decoder to extract the wrong calldata and revert
+//   with "claimed eventType does not match decoded tx".
+// "immediate" mode is kept as a label but now also routes through the batch SDK.
 const PROVE_MODE = (process.env.PROVE_MODE || "immediate") as "immediate" | "batch";
 const BATCH_MAX = Number(process.env.PROVE_BATCH_SIZE || 10);
 // Safety net: re-check Postgres for anything still unproven every so often.
@@ -83,15 +86,10 @@ async function drain(): Promise<void> {
   draining = true;
   try {
     while (queue.length > 0) {
-      if (PROVE_MODE === "batch") {
-        await drainOneBatch();
-      } else {
-        await proveOne(queue.shift()!);
-        // Add delay between submissions to avoid nonce conflicts
-        if (queue.length > 0) {
-          await new Promise(resolve => setTimeout(resolve, SUBMISSION_DELAY_MS));
-        }
-      }
+      // Always drain via the batch path — getBatchProof correctly encodes the
+      // tx bundle index, while getProof (used by proveOne) returns a wrong
+      // bundle index for txs not at position 0, causing on-chain reverts.
+      await drainOneBatch();
     }
   } finally {
     draining = false;
